@@ -9,7 +9,6 @@ import {
   MessageSquare,
   Bookmark,
   ChevronDown,
-  ChevronUp,
   ExternalLink,
   Calendar,
   Building2,
@@ -105,10 +104,19 @@ export default function LegislationCard({
     : null
 
   return (
-    <div className="rounded-xl border border-slate-700/60 bg-slate-800/80 backdrop-blur transition-colors hover:border-slate-600/80">
-      {/* Card body */}
-      <div className="p-4">
-        {/* Top row: status badge, file number, bookmark */}
+    <div
+      className="group rounded-xl border border-slate-700/60 bg-slate-800/80 backdrop-blur transition-colors hover:border-slate-600/80"
+    >
+      {/* Card body — clickable to expand */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={isExpanded}
+        onClick={() => setIsExpanded((e) => !e)}
+        onKeyDown={(e) => e.key === 'Enter' && setIsExpanded((v) => !v)}
+        className="cursor-pointer p-4 select-none"
+      >
+        {/* Top row: status badge, file number, chevron + bookmark */}
         <div className="mb-2 flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <span
@@ -120,20 +128,26 @@ export default function LegislationCard({
               {legislation.file_number}
             </span>
           </div>
-          <button
-            onClick={() => setBookmarked((b) => !b)}
-            aria-label={bookmarked ? 'Remove bookmark' : 'Bookmark'}
-            className={`shrink-0 rounded-md p-1.5 transition-colors ${
-              bookmarked
-                ? 'text-indigo-400 hover:text-indigo-300'
-                : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            <Bookmark
-              size={16}
-              className={bookmarked ? 'fill-indigo-400' : ''}
+          <div className="flex shrink-0 items-center gap-1">
+            <ChevronDown
+              size={15}
+              className={`text-slate-500 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
             />
-          </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setBookmarked((b) => !b) }}
+              aria-label={bookmarked ? 'Remove bookmark' : 'Bookmark'}
+              className={`rounded-md p-1.5 transition-colors ${
+                bookmarked
+                  ? 'text-indigo-400 hover:text-indigo-300'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <Bookmark
+                size={16}
+                className={bookmarked ? 'fill-indigo-400' : ''}
+              />
+            </button>
+          </div>
         </div>
 
         {/* Title */}
@@ -155,7 +169,7 @@ export default function LegislationCard({
           </p>
         )}
 
-        {/* Engagement stats + expand toggle */}
+        {/* Engagement stats */}
         <div className="flex flex-wrap items-center gap-3">
           <StatPill
             icon={<ThumbsUp size={13} />}
@@ -187,108 +201,98 @@ export default function LegislationCard({
             color="text-slate-400"
             label="Saves"
           />
-
-          <button
-            onClick={() => setIsExpanded((e) => !e)}
-            className="ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-slate-700/60 hover:text-slate-200"
-          >
-            {isExpanded ? (
-              <>
-                Collapse <ChevronUp size={13} />
-              </>
-            ) : (
-              <>
-                Details <ChevronDown size={13} />
-              </>
-            )}
-          </button>
         </div>
       </div>
 
-      {/* Level 2 expanded section */}
-      {isExpanded && (
-        <div className="border-t border-slate-700/60 px-4 py-3">
-          <dl className="space-y-1.5 text-xs text-slate-400">
-            {legislation.committee_name && (
-              <div className="flex items-start gap-2">
-                <dt className="flex shrink-0 items-center gap-1 text-slate-500">
-                  <Building2 size={12} /> Committee
-                </dt>
-                <dd className="text-slate-300">{legislation.committee_name}</dd>
-              </div>
-            )}
-            {legislation.primary_sponsor && (
-              <div className="flex items-start gap-2">
-                <dt className="flex shrink-0 items-center gap-1 text-slate-500">
-                  <User size={12} /> Sponsor
-                </dt>
-                <dd>
-                  {legislation.primary_sponsor_slug ? (
-                    <Link
-                      href={`/council-members/${legislation.primary_sponsor_slug}`}
-                      className="text-indigo-400 hover:underline"
-                    >
-                      {legislation.primary_sponsor}
-                    </Link>
-                  ) : (
-                    <span className="text-slate-300">
-                      {legislation.primary_sponsor}
-                    </span>
-                  )}
-                </dd>
-              </div>
-            )}
-            {introDate && (
-              <div className="flex items-start gap-2">
-                <dt className="flex shrink-0 items-center gap-1 text-slate-500">
-                  <Calendar size={12} /> Introduced
-                </dt>
-                <dd className="text-slate-300">
-                  {introDate.toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  })}
-                </dd>
-              </div>
-            )}
-            {lastActionDate && (
-              <div className="flex items-start gap-2">
-                <dt className="flex shrink-0 items-center gap-1 text-slate-500">
-                  <Calendar size={12} /> Last Action
-                </dt>
-                <dd className="text-slate-300">
-                  {lastActionDate.toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  })}
-                  {legislation.last_action_text && (
-                    <span className="ml-1 text-slate-500">
-                      &mdash; {legislation.last_action_text}
-                    </span>
-                  )}
-                  {lastActionDate && (
+      {/* Level 2 — animated expand using CSS grid trick */}
+      <div
+        className={`grid transition-all duration-300 ease-in-out ${
+          isExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+        }`}
+      >
+        <div className="overflow-hidden">
+          <div className="border-t border-slate-700/60 px-4 py-3">
+            <dl className="space-y-2 text-xs">
+              {legislation.committee_name && (
+                <div className="flex items-start gap-2">
+                  <dt className="flex w-24 shrink-0 items-center gap-1 text-slate-500">
+                    <Building2 size={12} /> Committee
+                  </dt>
+                  <dd className="text-slate-300">{legislation.committee_name}</dd>
+                </div>
+              )}
+              {legislation.primary_sponsor && (
+                <div className="flex items-start gap-2">
+                  <dt className="flex w-24 shrink-0 items-center gap-1 text-slate-500">
+                    <User size={12} /> Sponsor
+                  </dt>
+                  <dd>
+                    {legislation.primary_sponsor_slug ? (
+                      <Link
+                        href={`/council-members/${legislation.primary_sponsor_slug}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-indigo-400 hover:underline"
+                      >
+                        {legislation.primary_sponsor}
+                      </Link>
+                    ) : (
+                      <span className="text-slate-300">
+                        {legislation.primary_sponsor}
+                      </span>
+                    )}
+                  </dd>
+                </div>
+              )}
+              {introDate && (
+                <div className="flex items-start gap-2">
+                  <dt className="flex w-24 shrink-0 items-center gap-1 text-slate-500">
+                    <Calendar size={12} /> Introduced
+                  </dt>
+                  <dd className="text-slate-300">
+                    {introDate.toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </dd>
+                </div>
+              )}
+              {lastActionDate && (
+                <div className="flex items-start gap-2">
+                  <dt className="flex w-24 shrink-0 items-center gap-1 text-slate-500">
+                    <Calendar size={12} /> Last Action
+                  </dt>
+                  <dd className="text-slate-300">
+                    {lastActionDate.toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                    {legislation.last_action_text && (
+                      <span className="ml-1 text-slate-500">
+                        &mdash; {legislation.last_action_text}
+                      </span>
+                    )}
                     <span className="ml-1 text-slate-600">
-                      ({formatDistanceToNow(lastActionDate, { addSuffix: true })}
-                      )
+                      ({formatDistanceToNow(lastActionDate, { addSuffix: true })})
                     </span>
-                  )}
-                </dd>
-              </div>
-            )}
-          </dl>
+                  </dd>
+                </div>
+              )}
+            </dl>
 
-          <div className="mt-3 flex justify-end">
-            <Link
-              href={`/legislation/${legislation.slug}`}
-              className="flex items-center gap-1 rounded-md bg-indigo-600/80 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500"
-            >
-              View Full Details <ExternalLink size={12} />
-            </Link>
+            <div className="mt-3 flex justify-end">
+              <Link
+                href={`/legislation/${legislation.slug}`}
+                onClick={(e) => e.stopPropagation()}
+                className="flex items-center gap-1 rounded-md bg-indigo-600/80 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500"
+              >
+                View Details <ExternalLink size={12} />
+              </Link>
+            </div>
           </div>
         </div>
-      )}
+      </div>
     </div>
   )
 }
