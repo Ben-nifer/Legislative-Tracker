@@ -1,0 +1,70 @@
+import Link from 'next/link'
+import { createServerSupabaseClient } from '@/lib/supabase/server'
+import UserMenu from './UserMenu'
+import { Scale } from 'lucide-react'
+
+const NAV_LINKS = [
+  { href: '/legislation', label: 'Legislation' },
+  { href: '/council-members', label: 'Council Members' },
+]
+
+export default async function Header() {
+  const supabase = await createServerSupabaseClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  let profile: { display_name: string; username: string } | null = null
+  if (user) {
+    const { data } = await supabase
+      .from('user_profiles')
+      .select('display_name, username')
+      .eq('id', user.id)
+      .maybeSingle()
+    profile = data
+  }
+
+  return (
+    <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
+      <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4 sm:px-6 lg:px-8">
+        {/* Logo */}
+        <Link
+          href="/"
+          className="flex items-center gap-2 text-sm font-semibold text-white shrink-0"
+        >
+          <Scale size={18} className="text-indigo-400" />
+          <span className="hidden sm:inline">NYC Legislative Tracker</span>
+          <span className="sm:hidden">NYC Tracker</span>
+        </Link>
+
+        {/* Nav */}
+        <nav className="flex items-center gap-1">
+          {NAV_LINKS.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="rounded-md px-3 py-1.5 text-sm text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100"
+            >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
+
+        {/* Right side */}
+        <div className="ml-auto flex items-center gap-3">
+          {user && profile ? (
+            <UserMenu
+              displayName={profile.display_name}
+              username={profile.username}
+            />
+          ) : (
+            <Link
+              href="/login"
+              className="rounded-lg bg-indigo-500 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-400"
+            >
+              Sign in
+            </Link>
+          )}
+        </div>
+      </div>
+    </header>
+  )
+}
