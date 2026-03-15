@@ -8,8 +8,21 @@ export async function GET(request: Request) {
 
   if (code) {
     const supabase = await createServerSupabaseClient()
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
-    if (!error) {
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+
+    if (!error && data.user) {
+      // Check if this user has a profile yet
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('id')
+        .eq('id', data.user.id)
+        .maybeSingle()
+
+      if (!profile) {
+        // New user — send to onboarding
+        return NextResponse.redirect(`${origin}/onboarding?next=${encodeURIComponent(next)}`)
+      }
+
       return NextResponse.redirect(`${origin}${next}`)
     }
   }

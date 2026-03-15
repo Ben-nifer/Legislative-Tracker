@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 
 // Routes that require authentication
-const protectedRoutes = ['/watchlist', '/profile', '/notifications', '/settings']
+const protectedRoutes = ['/watchlist', '/profile', '/notifications', '/settings', '/onboarding']
 
 export async function middleware(request: NextRequest) {
   const { supabaseResponse, user } = await updateSession(request)
@@ -18,6 +18,11 @@ export async function middleware(request: NextRequest) {
     loginUrl.pathname = '/login'
     loginUrl.searchParams.set('next', pathname)
     return NextResponse.redirect(loginUrl)
+  }
+
+  // Redirect logged-in users away from login page
+  if (pathname === '/login' && user) {
+    return NextResponse.redirect(new URL('/', request.url))
   }
 
   return supabaseResponse
