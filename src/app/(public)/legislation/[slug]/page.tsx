@@ -17,6 +17,8 @@ import {
   Clock,
 } from 'lucide-react'
 import { formatDistanceToNow, format } from 'date-fns'
+import { Suspense } from 'react'
+import CommentThread from '@/components/comments/CommentThread'
 
 export const revalidate = 300
 
@@ -211,10 +213,14 @@ function fmt(dateStr: string | null) {
 
 export default async function LegislationDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>
+  searchParams: Promise<{ sort?: string }>
 }) {
   const { slug } = await params
+  const { sort } = await searchParams
+  const commentSort = sort === 'most_engaged' ? 'most_engaged' : 'latest'
   const legislation = await getLegislation(slug)
 
   if (!legislation) notFound()
@@ -555,17 +561,19 @@ export default async function LegislationDetailPage({
             </section>
           )}
 
-          {/* ── Comments placeholder ────────────────────────────────── */}
-          <section
-            id="comments"
-            className="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-8 text-center"
-          >
-            <MessageSquare className="mx-auto mb-3 text-slate-700" size={32} />
-            <p className="text-sm font-medium text-slate-500">Comments coming soon</p>
-            <p className="mt-1 text-xs text-slate-700">
-              Full comment threads with upvotes, stances, and filtering — Week 4
-            </p>
-          </section>
+          {/* ── Comments ────────────────────────────────────────────── */}
+          <div className="rounded-xl border border-slate-700/60 bg-slate-800/80 p-5">
+            <Suspense fallback={
+              <div className="flex items-center gap-2 py-4 text-sm text-slate-500">
+                <MessageSquare size={14} /> Loading comments...
+              </div>
+            }>
+              <CommentThread
+                legislationId={legislation.id}
+                sort={commentSort}
+              />
+            </Suspense>
+          </div>
 
         </div>
       </div>
