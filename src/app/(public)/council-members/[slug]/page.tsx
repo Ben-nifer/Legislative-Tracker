@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft, Mail, MapPin, FileText } from 'lucide-react'
 import { format } from 'date-fns'
+import FollowButton from '@/components/council/FollowButton'
 
 export const revalidate = 3600
 
@@ -37,6 +38,8 @@ export default async function CouncilMemberPage({
   const { slug } = await params
   const supabase = await createServerSupabaseClient()
 
+  const { data: { user } } = await supabase.auth.getUser()
+
   const { data: member } = await supabase
     .from('legislators')
     .select('id, full_name, slug, district, borough, party, email, title, is_active, photo_url')
@@ -44,6 +47,16 @@ export default async function CouncilMemberPage({
     .maybeSingle()
 
   if (!member) notFound()
+
+  // Check if current user follows this legislator
+  const isFollowing = user
+    ? !!(await supabase
+        .from('legislator_follows')
+        .select('legislator_id')
+        .match({ user_id: user.id, legislator_id: member.id })
+        .maybeSingle()
+      ).data
+    : false
 
   // Get their sponsored legislation
   const { data: sponsorships } = await supabase
@@ -95,7 +108,7 @@ export default async function CouncilMemberPage({
           <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-indigo-500/20 text-xl font-bold text-indigo-300">
             {initials}
           </div>
-          <div>
+          <div className="flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-2xl font-bold text-white">{member.full_name}</h1>
               {!member.is_active && (
@@ -123,6 +136,13 @@ export default async function CouncilMemberPage({
                   <Mail size={13} /> {member.email}
                 </a>
               )}
+            </div>
+            <div className="mt-3">
+              <FollowButton
+                legislatorId={member.id}
+                initialFollowing={isFollowing}
+                isLoggedIn={!!user}
+              />
             </div>
           </div>
         </section>
