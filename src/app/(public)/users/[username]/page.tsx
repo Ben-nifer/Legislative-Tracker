@@ -2,7 +2,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { format } from 'date-fns'
-import { ArrowLeft, MessageSquare, Bookmark } from 'lucide-react'
+import { ArrowLeft, MessageSquare, Bookmark, Tag } from 'lucide-react'
 import FollowUserButton from '@/components/profile/FollowUserButton'
 
 export const revalidate = 60
@@ -73,6 +73,7 @@ export default async function UserProfilePage({
     { count: neutralCount },
     { data: bookmarksData },
     { data: commentsData },
+    { data: interestTagsData },
   ] = await Promise.all([
     user && !isOwnProfile
       ? supabase
@@ -121,10 +122,19 @@ export default async function UserProfilePage({
       .eq('is_hidden', false)
       .order('created_at', { ascending: false })
       .limit(5),
+    supabase
+      .from('user_interest_tags')
+      .select('tag:interest_tags(id, name, slug, is_predefined)')
+      .eq('user_id', profile.id),
   ])
 
   const isFollowing = !!(isFollowingResult as { data: unknown }).data
   const followingCount = (userFollowingCount ?? 0) + (legislatorFollowingCount ?? 0)
+
+  const interestTags = (interestTagsData ?? []).flatMap((r) => {
+    const t = Array.isArray(r.tag) ? r.tag[0] : r.tag
+    return t ? [t] : []
+  })
 
   const bookmarks = (bookmarksData ?? []).flatMap((b) => {
     const leg = Array.isArray(b.legislation) ? b.legislation[0] : b.legislation
@@ -159,6 +169,25 @@ export default async function UserProfilePage({
             <p className="text-slate-500 text-sm mt-0.5">@{profile.username}</p>
             {profile.bio && (
               <p className="mt-2 text-sm text-slate-300">{profile.bio}</p>
+            )}
+
+            {/* Interest tags */}
+            {interestTags.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {interestTags.map((tag) => (
+                  <span
+                    key={tag.id}
+                    className={[
+                      'rounded-full border px-2.5 py-0.5 text-xs',
+                      tag.is_predefined
+                        ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300'
+                        : 'border-purple-500/30 bg-purple-500/10 text-purple-300',
+                    ].join(' ')}
+                  >
+                    {tag.name}
+                  </span>
+                ))}
+              </div>
             )}
 
             {/* Follower / following counts */}

@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import ProfileEditor from './ProfileEditor'
+import InterestTagsEditor from './InterestTagsEditor'
+import { Tag } from 'lucide-react'
 
 export default async function ProfilePage() {
   const supabase = await createServerSupabaseClient()
@@ -16,14 +18,33 @@ export default async function ProfilePage() {
 
   if (!profile) redirect('/onboarding')
 
-  // Engagement stats
-  const [{ count: supportCount }, { count: opposeCount }, { count: neutralCount }, { count: bookmarkCount }] =
-    await Promise.all([
-      supabase.from('user_stances').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('stance', 'support'),
-      supabase.from('user_stances').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('stance', 'oppose'),
-      supabase.from('user_stances').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('stance', 'neutral'),
-      supabase.from('bookmarks').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
-    ])
+  // Engagement stats + interest tags in parallel
+  const [
+    { count: supportCount },
+    { count: opposeCount },
+    { count: neutralCount },
+    { count: bookmarkCount },
+    { data: predefinedTagsData },
+    { data: userTagsData },
+  ] = await Promise.all([
+    supabase.from('user_stances').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('stance', 'support'),
+    supabase.from('user_stances').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('stance', 'oppose'),
+    supabase.from('user_stances').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('stance', 'neutral'),
+    supabase.from('bookmarks').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
+    supabase.from('interest_tags').select('id, name, slug, is_predefined').eq('is_predefined', true).order('name'),
+    supabase
+      .from('user_interest_tags')
+      .select('tag:interest_tags(id, name, slug, is_predefined)')
+      .eq('user_id', user.id),
+  ])
+
+  const predefinedTags = predefinedTagsData ?? []
+  const userTags = (userTagsData ?? []).flatMap((r) => {
+    const t = Array.isArray(r.tag) ? r.tag[0] : r.tag
+    return t ? [t] : []
+  })
+  const selectedIds = userTags.map((t) => t.id)
+  const customTags = userTags.filter((t) => !t.is_predefined)
 
   return (
     <div className="min-h-screen bg-slate-950 py-12 px-4">
@@ -55,6 +76,22 @@ export default async function ProfilePage() {
 
         {/* Edit form */}
         <ProfileEditor profile={profile} />
+
+        {/* Interest tags */}
+        <div className="rounded-xl border border-slate-700 bg-slate-800/80 p-6">
+          <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-white">
+            <Tag size={16} className="text-purple-400" />
+            Interests
+          </h2>
+          <p className="mb-4 text-xs text-slate-500">
+            Select predefined interests or create your own. These appear on your public profile.
+          </p>
+          <InterestTagsEditor
+            predefinedTags={predefinedTags}
+            initialSelectedIds={selectedIds}
+            initialCustomTags={customTags}
+          />
+        </div>
       </div>
     </div>
   )
