@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
-import { ArrowRight, FileText, Users, TrendingUp, MessageSquare, Rss } from 'lucide-react'
+import { ArrowRight, TrendingUp, Rss } from 'lucide-react'
 import { format } from 'date-fns'
 
 export const revalidate = 300
@@ -31,16 +31,12 @@ export default async function HomePage() {
 
   const [
     { count: totalLegislation },
-    { count: totalLegislators },
-    { count: totalStances },
     { data: recent },
     { data: trending },
     { data: legislatorFollowsData },
     { data: userFollowsData },
   ] = await Promise.all([
     supabase.from('legislation').select('*', { count: 'exact', head: true }),
-    supabase.from('legislators').select('*', { count: 'exact', head: true }).eq('is_active', true),
-    supabase.from('user_stances').select('*', { count: 'exact', head: true }),
     supabase
       .from('legislation')
       .select('id, slug, file_number, title, status, type, intro_date, ai_summary')
@@ -48,13 +44,13 @@ export default async function HomePage() {
       .order('intro_date', { ascending: false })
       .limit(5),
     supabase
-      .from('legislation')
+      .from('legislation_stats')
       .select(`
-        id, slug, file_number, title, status, type,
-        stats:legislation_stats(support_count, oppose_count, neutral_count, comment_count)
+        support_count, oppose_count, neutral_count, comment_count, trending_score,
+        legislation!inner(id, slug, file_number, title, status, type)
       `)
-      .not('type', 'is', null)
-      .order('intro_date', { ascending: false })
+      .not('trending_score', 'is', null)
+      .order('trending_score', { ascending: false })
       .limit(5),
     user
       ? supabase.from('legislator_follows').select('legislator_id').eq('user_id', user.id)
@@ -140,24 +136,44 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* ── Stats ────────────────────────────────────────────────────── */}
+      {/* ── Trending ─────────────────────────────────────────────────── */}
       <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          {[
-            { icon: <FileText size={20} />, value: totalLegislation?.toLocaleString() ?? '—', label: 'Bills & Resolutions', color: 'text-indigo-400' },
-            { icon: <Users size={20} />, value: totalLegislators?.toLocaleString() ?? '—', label: 'Active Council Members', color: 'text-purple-400' },
-            { icon: <TrendingUp size={20} />, value: totalStances?.toLocaleString() ?? '—', label: 'User Stances Taken', color: 'text-emerald-400' },
-            { icon: <MessageSquare size={20} />, value: '—', label: 'Comments Posted', color: 'text-amber-400' },
-          ].map((stat) => (
-            <div
-              key={stat.label}
-              className="rounded-xl border border-slate-800 bg-slate-900/60 p-5"
-            >
-              <div className={`mb-2 ${stat.color}`}>{stat.icon}</div>
-              <p className={`text-2xl font-bold tabular-nums ${stat.color}`}>{stat.value}</p>
-              <p className="mt-0.5 text-xs text-slate-500">{stat.label}</p>
-            </div>
-          ))}
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <TrendingUp size={16} className="text-indigo-400" />
+            <h2 className="text-base font-semibold text-slate-200">Trending</h2>
+          </div>
+          <Link href="/trending" className="text-xs text-indigo-400 hover:underline">
+            View all →
+          </Link>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {(trending ?? []).map((row) => {
+            const leg = Array.isArray(row.legislation) ? row.legislation[0] : row.legislation
+            if (!leg) return null
+            const total = (row.support_count ?? 0) + (row.oppose_count ?? 0) + (row.neutral_count ?? 0)
+            return (
+              <Link
+                key={leg.id}
+                href={`/legislation/${leg.slug}`}
+                className="block rounded-xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-slate-700 hover:bg-slate-800/60"
+              >
+                <div className="mb-2 flex items-center gap-2">
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${getStatusStyle(leg.status)}`}>
+                    {leg.status}
+                  </span>
+                  <span className="font-mono text-xs text-slate-500">{leg.file_number}</span>
+                </div>
+                <p className="line-clamp-2 text-sm text-slate-300">{leg.title}</p>
+                <div className="mt-2 flex items-center gap-3 text-xs text-slate-600">
+                  <span className="text-emerald-500/80">{row.support_count ?? 0} support</span>
+                  <span className="text-red-500/80">{row.oppose_count ?? 0} oppose</span>
+                  <span className="text-slate-500">{row.comment_count ?? 0} comments</span>
+                  {total > 0 && <span className="ml-auto">{total} responses</span>}
+                </div>
+              </Link>
+            )
+          })}
         </div>
       </section>
 
@@ -217,81 +233,38 @@ export default async function HomePage() {
         )}
       </section>
 
-      {/* ── Two-col: Recent + Trending ───────────────────────────────── */}
+      {/* ── Recently Introduced ──────────────────────────────────────── */}
       <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
-        <div className="grid gap-8 lg:grid-cols-2">
-
-          {/* Recent introductions */}
-          <div>
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-slate-200">Recently Introduced</h2>
-              <Link href="/legislation" className="text-xs text-indigo-400 hover:underline">
-                View all →
-              </Link>
-            </div>
-            <div className="space-y-3">
-              {(recent ?? []).map((item) => (
-                <Link
-                  key={item.id}
-                  href={`/legislation/${item.slug}`}
-                  className="block rounded-xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-slate-700 hover:bg-slate-800/60"
-                >
-                  <div className="mb-2 flex items-center gap-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs ${getStatusStyle(item.status)}`}>
-                      {item.status}
-                    </span>
-                    <span className="font-mono text-xs text-slate-500">{item.file_number}</span>
-                    {item.intro_date && (
-                      <span className="ml-auto text-xs text-slate-600">
-                        {format(new Date(item.intro_date), 'MMM d')}
-                      </span>
-                    )}
-                  </div>
-                  <p className="line-clamp-2 text-sm text-slate-300">{item.title}</p>
-                  {item.ai_summary && (
-                    <p className="mt-1.5 line-clamp-2 text-xs text-slate-500">{item.ai_summary}</p>
-                  )}
-                </Link>
-              ))}
-            </div>
-          </div>
-
-          {/* Most engaged */}
-          <div>
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-slate-200">Most Engaged</h2>
-              <Link href="/legislation" className="text-xs text-indigo-400 hover:underline">
-                View all →
-              </Link>
-            </div>
-            <div className="space-y-3">
-              {(trending ?? []).map((item) => {
-                const statsRow = Array.isArray(item.stats) ? item.stats[0] : item.stats
-                const total = (statsRow?.support_count ?? 0) + (statsRow?.oppose_count ?? 0) + (statsRow?.neutral_count ?? 0)
-                return (
-                  <Link
-                    key={item.id}
-                    href={`/legislation/${item.slug}`}
-                    className="block rounded-xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-slate-700 hover:bg-slate-800/60"
-                  >
-                    <div className="mb-2 flex items-center gap-2">
-                      <span className={`rounded-full px-2 py-0.5 text-xs ${getStatusStyle(item.status)}`}>
-                        {item.status}
-                      </span>
-                      <span className="font-mono text-xs text-slate-500">{item.file_number}</span>
-                    </div>
-                    <p className="line-clamp-2 text-sm text-slate-300">{item.title}</p>
-                    <div className="mt-2 flex items-center gap-3 text-xs text-slate-600">
-                      <span className="text-emerald-500/80">{statsRow?.support_count ?? 0} support</span>
-                      <span className="text-red-500/80">{statsRow?.oppose_count ?? 0} oppose</span>
-                      <span className="text-slate-500">{statsRow?.comment_count ?? 0} comments</span>
-                      {total > 0 && <span className="ml-auto">{total} responses</span>}
-                    </div>
-                  </Link>
-                )
-              })}
-            </div>
-          </div>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-slate-200">Recently Introduced</h2>
+          <Link href="/legislation" className="text-xs text-indigo-400 hover:underline">
+            View all →
+          </Link>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {(recent ?? []).map((item) => (
+            <Link
+              key={item.id}
+              href={`/legislation/${item.slug}`}
+              className="block rounded-xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-slate-700 hover:bg-slate-800/60"
+            >
+              <div className="mb-2 flex items-center gap-2">
+                <span className={`rounded-full px-2 py-0.5 text-xs ${getStatusStyle(item.status)}`}>
+                  {item.status}
+                </span>
+                <span className="font-mono text-xs text-slate-500">{item.file_number}</span>
+                {item.intro_date && (
+                  <span className="ml-auto text-xs text-slate-600">
+                    {format(new Date(item.intro_date), 'MMM d')}
+                  </span>
+                )}
+              </div>
+              <p className="line-clamp-2 text-sm text-slate-300">{item.title}</p>
+              {item.ai_summary && (
+                <p className="mt-1.5 line-clamp-2 text-xs text-slate-500">{item.ai_summary}</p>
+              )}
+            </Link>
+          ))}
         </div>
       </section>
     </main>
