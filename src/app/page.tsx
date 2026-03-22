@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
-import { ArrowRight, FileText, Users, TrendingUp, MessageSquare } from 'lucide-react'
+import { ArrowRight, FileText, Users, TrendingUp, MessageSquare, Rss } from 'lucide-react'
 import { format } from 'date-fns'
 
 export const revalidate = 300
@@ -16,8 +16,18 @@ function getStatusStyle(status: string) {
   return 'bg-amber-500/20 text-amber-300'
 }
 
+type FeedItem = {
+  id: string
+  slug: string
+  file_number: string
+  title: string
+  status: string
+  intro_date: string | null
+}
+
 export default async function HomePage() {
   const supabase = await createServerSupabaseClient()
+  const { data: { user } } = await supabase.auth.getUser()
 
   const [
     { count: totalLegislation },
@@ -25,6 +35,8 @@ export default async function HomePage() {
     { count: totalStances },
     { data: recent },
     { data: trending },
+    { data: legislatorFollowsData },
+    { data: userFollowsData },
   ] = await Promise.all([
     supabase.from('legislation').select('*', { count: 'exact', head: true }),
     supabase.from('legislators').select('*', { count: 'exact', head: true }).eq('is_active', true),
@@ -44,7 +56,55 @@ export default async function HomePage() {
       .not('type', 'is', null)
       .order('intro_date', { ascending: false })
       .limit(5),
+    user
+      ? supabase.from('legislator_follows').select('legislator_id').eq('user_id', user.id)
+      : Promise.resolve({ data: [] as { legislator_id: string }[], error: null }),
+    user
+      ? supabase.from('user_follows').select('following_id').eq('follower_id', user.id)
+      : Promise.resolve({ data: [] as { following_id: string }[], error: null }),
   ])
+
+  const followedLegislatorIds = (legislatorFollowsData ?? []).map((f) => f.legislator_id)
+  const followedUserIds = (userFollowsData ?? []).map((f) => f.following_id)
+  const hasFollows = followedLegislatorIds.length > 0 || followedUserIds.length > 0
+
+  // Phase 2: feed queries — only if user follows someone
+  const [sponsorshipsResult, stancesResult] = await Promise.all([
+    followedLegislatorIds.length > 0
+      ? supabase
+          .from('sponsorships')
+          .select('legislator_id, legislation:legislation(id, slug, file_number, title, status, intro_date)')
+          .in('legislator_id', followedLegislatorIds)
+          .order('legislation(intro_date)', { ascending: false })
+          .limit(20)
+      : Promise.resolve({ data: [] as { legislator_id: string; legislation: FeedItem | FeedItem[] | null }[], error: null }),
+    followedUserIds.length > 0
+      ? supabase
+          .from('user_stances')
+          .select('legislation:legislation(id, slug, file_number, title, status, intro_date)')
+          .in('user_id', followedUserIds)
+          .order('updated_at', { ascending: false })
+          .limit(20)
+      : Promise.resolve({ data: [] as { legislation: FeedItem | FeedItem[] | null }[], error: null }),
+  ])
+
+  // Deduplicate and merge both feeds
+  const seen = new Set<string>()
+  const legislatorItems: FeedItem[] = (sponsorshipsResult.data ?? []).flatMap((s) => {
+    const leg = Array.isArray(s.legislation) ? s.legislation[0] : s.legislation
+    if (!leg || seen.has(leg.id)) return []
+    seen.add(leg.id)
+    return [leg]
+  })
+
+  const stanceItems: FeedItem[] = (stancesResult.data ?? []).flatMap((s) => {
+    const leg = Array.isArray(s.legislation) ? s.legislation[0] : s.legislation
+    if (!leg || seen.has(leg.id)) return []
+    seen.add(leg.id)
+    return [leg]
+  })
+
+  const feedItems = [...legislatorItems, ...stanceItems].slice(0, 6)
 
   return (
     <main className="min-h-screen bg-slate-950">
@@ -99,6 +159,62 @@ export default async function HomePage() {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* ── New from people you follow ───────────────────────────────── */}
+      <section className="mx-auto max-w-7xl px-4 pb-10 sm:px-6 lg:px-8">
+        <div className="mb-4 flex items-center gap-2">
+          <Rss size={16} className="text-indigo-400" />
+          <h2 className="text-base font-semibold text-slate-200">New from people you follow</h2>
+        </div>
+
+        {!user ? (
+          // Not logged in — sign-in prompt
+          <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-8 text-center">
+            <p className="text-sm text-slate-400">
+              <Link href="/login" className="text-indigo-400 hover:underline">Sign in</Link>
+              {' '}to track legislation and follow council members.
+            </p>
+          </div>
+        ) : !hasFollows ? (
+          // Logged in, follows nobody yet
+          <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-8 text-center">
+            <p className="text-sm text-slate-400">Follow council members to see their legislation here.</p>
+            <div className="mt-3 flex items-center justify-center gap-4 text-sm">
+              <Link href="/council-members" className="text-indigo-400 hover:underline">Browse council members</Link>
+              <span className="text-slate-700">·</span>
+              <Link href="/following" className="text-indigo-400 hover:underline">Manage following</Link>
+            </div>
+          </div>
+        ) : feedItems.length === 0 ? (
+          // Follows someone but no legislation yet
+          <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-8 text-center">
+            <p className="text-sm text-slate-500">No recent legislation from the people you follow.</p>
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {feedItems.map((item) => (
+              <Link
+                key={item.id}
+                href={`/legislation/${item.slug}`}
+                className="block rounded-xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-slate-700 hover:bg-slate-800/60"
+              >
+                <div className="mb-2 flex items-center gap-2">
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${getStatusStyle(item.status)}`}>
+                    {item.status}
+                  </span>
+                  <span className="font-mono text-xs text-slate-500">{item.file_number}</span>
+                  {item.intro_date && (
+                    <span className="ml-auto text-xs text-slate-600">
+                      {format(new Date(item.intro_date), 'MMM d')}
+                    </span>
+                  )}
+                </div>
+                <p className="line-clamp-2 text-sm text-slate-300">{item.title}</p>
+              </Link>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* ── Two-col: Recent + Trending ───────────────────────────────── */}

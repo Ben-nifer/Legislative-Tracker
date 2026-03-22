@@ -29,6 +29,7 @@ export async function followUser(
   })
 
   revalidatePath(`/users/[username]`, 'page')
+  revalidatePath('/')
   return {}
 }
 
@@ -67,6 +68,7 @@ export async function followLegislator(
 
   revalidatePath('/following')
   revalidatePath('/users/[username]', 'page')
+  revalidatePath('/')
   return {}
 }
 
