@@ -226,13 +226,22 @@ export default async function LegislationDetailPage({
   if (!legislation) notFound()
 
   let userStance: 'support' | 'oppose' | 'neutral' | 'watching' | null = null
+  let isFollowing = false
   if (user) {
-    const { data } = await supabase
-      .from('user_stances')
-      .select('stance')
-      .match({ user_id: user.id, legislation_id: legislation.id })
-      .maybeSingle()
-    userStance = (data?.stance as typeof userStance) ?? null
+    const [stanceResult, followResult] = await Promise.all([
+      supabase
+        .from('user_stances')
+        .select('stance')
+        .match({ user_id: user.id, legislation_id: legislation.id })
+        .maybeSingle(),
+      supabase
+        .from('legislation_follows')
+        .select('legislation_id')
+        .match({ user_id: user.id, legislation_id: legislation.id })
+        .maybeSingle(),
+    ])
+    userStance = (stanceResult.data?.stance as typeof userStance) ?? null
+    isFollowing = !!followResult.data
   }
 
   const statusStyle = getStatusStyle(legislation.status)
@@ -459,6 +468,7 @@ export default async function LegislationDetailPage({
               legislationId={legislation.id}
               initialStats={legislation.stats}
               initialUserStance={userStance}
+              initialWatching={isFollowing}
               isLoggedIn={!!user}
             />
           </section>

@@ -1,8 +1,9 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { Users, Tag, FileText, ArrowRight, UserRound } from 'lucide-react'
+import { Users, Tag, FileText, ArrowRight, UserRound, Bell } from 'lucide-react'
 import { format } from 'date-fns'
+import LegislationFollowRow from '@/components/following/LegislationFollowRow'
 
 export const metadata = {
   title: 'Following | NYC Legislative Tracker',
@@ -31,6 +32,7 @@ export default async function FollowingPage() {
     { data: legislatorFollows },
     { data: topicFollows },
     { data: userFollows },
+    { data: legislationFollows },
   ] = await Promise.all([
     supabase
       .from('legislator_follows')
@@ -47,6 +49,17 @@ export default async function FollowingPage() {
       .select('following_id, profile:user_profiles!user_follows_following_id_fkey(id, username, display_name, bio)')
       .eq('follower_id', user.id)
       .order('created_at', { ascending: false }),
+    supabase
+      .from('legislation_follows')
+      .select(`
+        legislation_id,
+        notify_updates,
+        notify_hearings,
+        notify_amendments,
+        legislation:legislation(id, file_number, slug, title, status)
+      `)
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false }),
   ])
 
   const followedLegislators = (legislatorFollows ?? []).flatMap((f) => {
@@ -57,6 +70,17 @@ export default async function FollowingPage() {
   const followedTopics = (topicFollows ?? []).flatMap((f) => {
     const topic = Array.isArray(f.topic) ? f.topic[0] : f.topic
     return topic ? [topic] : []
+  })
+
+  const followedLegislation = (legislationFollows ?? []).flatMap((f) => {
+    const leg = Array.isArray(f.legislation) ? f.legislation[0] : f.legislation
+    if (!leg) return []
+    return [{
+      ...leg,
+      notify_updates: f.notify_updates ?? true,
+      notify_hearings: f.notify_hearings ?? true,
+      notify_amendments: f.notify_amendments ?? true,
+    }]
   })
 
   const followedUsers = (userFollows ?? []).flatMap((f) => {
@@ -217,6 +241,46 @@ export default async function FollowingPage() {
                 >
                   {t.name}
                 </span>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* ── Followed Legislation ─────────────────────────────────── */}
+        <section>
+          <div className="mb-4 flex items-center gap-2">
+            <Bell size={16} className="text-emerald-400" />
+            <h2 className="font-semibold text-slate-200">
+              Legislation
+              {followedLegislation.length > 0 && (
+                <span className="ml-2 rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-300">
+                  {followedLegislation.length}
+                </span>
+              )}
+            </h2>
+          </div>
+
+          {followedLegislation.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-700 p-8 text-center">
+              <p className="text-sm text-slate-500">You&apos;re not watching any legislation yet.</p>
+              <Link href="/legislation" className="mt-2 inline-flex items-center gap-1 text-sm text-indigo-400 hover:underline">
+                Browse legislation <ArrowRight size={13} />
+              </Link>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {followedLegislation.map((leg) => (
+                <LegislationFollowRow
+                  key={leg.id}
+                  legislationId={leg.id}
+                  slug={leg.slug}
+                  file_number={leg.file_number}
+                  title={leg.title}
+                  status={leg.status}
+                  notifyUpdates={leg.notify_updates}
+                  notifyHearings={leg.notify_hearings}
+                  notifyAmendments={leg.notify_amendments}
+                />
               ))}
             </div>
           )}

@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase/server'
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 
@@ -89,6 +89,89 @@ export async function unfollowLegislator(
   revalidatePath('/following')
   revalidatePath('/users/[username]', 'page')
   return {}
+}
+
+// ── Legislation ──────────────────────────────────────────────────────────────
+
+export async function followLegislation(
+  legislationId: string
+): Promise<{ error?: string }> {
+  const supabase = await createServerSupabaseClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  const { error } = await supabase
+    .from('legislation_follows')
+    .insert({
+      user_id: user.id,
+      legislation_id: legislationId,
+      notify_updates: true,
+      notify_hearings: true,
+      notify_amendments: true,
+    })
+
+  if (error) return { error: error.message }
+
+  // Keep watching_count in stats in sync
+  await updateWatchingCount(legislationId)
+
+  revalidatePath('/following')
+  return {}
+}
+
+export async function unfollowLegislation(
+  legislationId: string
+): Promise<{ error?: string }> {
+  const supabase = await createServerSupabaseClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  const { error } = await supabase
+    .from('legislation_follows')
+    .delete()
+    .match({ user_id: user.id, legislation_id: legislationId })
+
+  if (error) return { error: error.message }
+
+  // Keep watching_count in stats in sync
+  await updateWatchingCount(legislationId)
+
+  revalidatePath('/following')
+  return {}
+}
+
+export async function updateLegislationNotifySettings(
+  legislationId: string,
+  settings: {
+    notify_updates?: boolean
+    notify_hearings?: boolean
+    notify_amendments?: boolean
+  }
+): Promise<{ error?: string }> {
+  const supabase = await createServerSupabaseClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  const { error } = await supabase
+    .from('legislation_follows')
+    .update(settings)
+    .match({ user_id: user.id, legislation_id: legislationId })
+
+  if (error) return { error: error.message }
+  return {}
+}
+
+async function updateWatchingCount(legislationId: string) {
+  const service = createServiceClient()
+  const { count } = await service
+    .from('legislation_follows')
+    .select('*', { count: 'exact', head: true })
+    .eq('legislation_id', legislationId)
+
+  await service
+    .from('legislation_stats')
+    .update({ watching_count: count ?? 0 })
+    .eq('legislation_id', legislationId)
 }
 
 // ── Topics ───────────────────────────────────────────────────────────────────

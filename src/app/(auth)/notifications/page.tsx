@@ -2,7 +2,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { formatDistanceToNow } from 'date-fns'
-import { Bell, UserPlus, MessageSquare } from 'lucide-react'
+import { Bell, UserPlus, MessageSquare, FileText, Calendar, FilePen } from 'lucide-react'
 import MarkAllReadButton from './MarkAllReadButton'
 
 export const metadata = {
@@ -18,6 +18,12 @@ function NotificationIcon({ type }: { type: NotificationType }) {
     return <UserPlus size={16} className="text-indigo-400 shrink-0" />
   if (type === 'comment_reply' || type === 'comment_upvote')
     return <MessageSquare size={16} className="text-purple-400 shrink-0" />
+  if (type === 'legislation_update')
+    return <FileText size={16} className="text-emerald-400 shrink-0" />
+  if (type === 'hearing_alert')
+    return <Calendar size={16} className="text-blue-400 shrink-0" />
+  if (type === 'bill_amendment')
+    return <FilePen size={16} className="text-amber-400 shrink-0" />
   return <Bell size={16} className="text-slate-400 shrink-0" />
 }
 

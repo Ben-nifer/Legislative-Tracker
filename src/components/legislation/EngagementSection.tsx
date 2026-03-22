@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { ThumbsUp, ThumbsDown, Minus, Eye, MessageSquare, Bookmark } from 'lucide-react'
 import { setStance, type Stance } from '@/app/actions/engagement'
+import { followLegislation, unfollowLegislation } from '@/app/actions/social'
 
 type Stats = {
   support_count: number
@@ -13,7 +14,8 @@ type Stats = {
   bookmark_count: number
 }
 
-const STANCES = [
+// Support / Oppose / Neutral are mutually exclusive
+const OPINION_STANCES = [
   {
     value: 'support' as Stance,
     label: 'Support',
@@ -50,18 +52,6 @@ const STANCES = [
     countKey: 'neutral_count' as keyof Stats,
     tooltip: "I've reviewed this and have no strong opinion",
   },
-  {
-    value: 'watching' as Stance,
-    label: 'Watching',
-    icon: <Eye size={14} />,
-    tallyIcon: <Eye size={18} />,
-    activeClasses: 'bg-blue-500/20 border-blue-500/60 text-blue-300',
-    tallyColor: 'text-blue-400',
-    tallyBg: 'bg-blue-500/10',
-    tallyBorder: 'border-blue-500/20',
-    countKey: 'watching_count' as keyof Stats,
-    tooltip: "I'm tracking this but haven't decided yet",
-  },
 ]
 
 const INACTIVE = 'border-slate-600/60 text-slate-400 hover:border-slate-500 hover:text-slate-300 hover:bg-slate-700/40'
@@ -72,11 +62,10 @@ function applyStanceChange(stats: Stats, prev: Stance | null, next: Stance | nul
   const key = (s: Stance): keyof Stats =>
     s === 'support' ? 'support_count'
     : s === 'oppose' ? 'oppose_count'
-    : s === 'neutral' ? 'neutral_count'
-    : 'watching_count'
+    : 'neutral_count'
 
-  if (prev) updated[key(prev)] = Math.max(0, updated[key(prev)] as number - 1)
-  if (next) updated[key(next)] = (updated[key(next)] as number) + 1
+  if (prev && prev !== 'watching') updated[key(prev)] = Math.max(0, updated[key(prev)] as number - 1)
+  if (next && next !== 'watching') updated[key(next)] = (updated[key(next)] as number) + 1
   return updated
 }
 
@@ -84,16 +73,22 @@ export default function EngagementSection({
   legislationId,
   initialStats,
   initialUserStance,
+  initialWatching,
   isLoggedIn,
 }: {
   legislationId: string
   initialStats: Stats
   initialUserStance: Stance | null
+  initialWatching: boolean
   isLoggedIn: boolean
 }) {
   const [stats, setStats] = useState<Stats>(initialStats)
-  const [currentStance, setCurrentStance] = useState<Stance | null>(initialUserStance)
+  // Only support/oppose/neutral are tracked here — watching is separate
+  const effectiveStance = initialUserStance === 'watching' ? null : initialUserStance
+  const [currentStance, setCurrentStance] = useState<Stance | null>(effectiveStance)
+  const [isWatching, setIsWatching] = useState(initialWatching)
   const [pending, setPending] = useState(false)
+  const [watchPending, setWatchPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function handleStance(stance: Stance) {
@@ -104,7 +99,6 @@ export default function EngagementSection({
     const next = prev === stance ? null : stance
     const prevStats = stats
 
-    // Optimistic update — drives both buttons and tally
     setCurrentStance(next)
     setStats(applyStanceChange(stats, prev, next))
 
@@ -113,8 +107,32 @@ export default function EngagementSection({
     setPending(false)
 
     if (result.error) {
-      // Revert using captured pre-update values
       setCurrentStance(prev)
+      setStats(prevStats)
+      setError(result.error)
+    }
+  }
+
+  async function handleWatch() {
+    if (!isLoggedIn || watchPending) return
+    setError(null)
+
+    const prev = isWatching
+    const prevStats = stats
+    setIsWatching(!prev)
+    setStats((s) => ({
+      ...s,
+      watching_count: prev ? Math.max(0, s.watching_count - 1) : s.watching_count + 1,
+    }))
+
+    setWatchPending(true)
+    const result = prev
+      ? await unfollowLegislation(legislationId)
+      : await followLegislation(legislationId)
+    setWatchPending(false)
+
+    if (result.error) {
+      setIsWatching(prev)
       setStats(prevStats)
       setError(result.error)
     }
@@ -128,7 +146,8 @@ export default function EngagementSection({
       <div>
         <p className="mb-2 text-xs text-slate-500">Your stance</p>
         <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Your stance">
-          {STANCES.map((s) => {
+          {/* Opinion stances — mutually exclusive */}
+          {OPINION_STANCES.map((s) => {
             const isActive = currentStance === s.value
             return (
               <button
@@ -144,14 +163,38 @@ export default function EngagementSection({
               >
                 {s.icon}
                 <span>{s.label}</span>
-                {s.value !== 'watching' && (
-                  <span className="tabular-nums opacity-80">
-                    {(stats[s.countKey] as number).toLocaleString()}
-                  </span>
-                )}
+                <span className="tabular-nums opacity-80">
+                  {(stats[s.countKey] as number).toLocaleString()}
+                </span>
               </button>
             )
           })}
+
+          {/* Divider */}
+          <span className="mx-1 h-4 w-px bg-slate-700" />
+
+          {/* Watching — independent toggle */}
+          <button
+            onClick={handleWatch}
+            disabled={!isLoggedIn || watchPending}
+            title={isLoggedIn ? "Watch for updates" : 'Sign in to watch'}
+            aria-pressed={isWatching}
+            className={[
+              'flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all duration-150',
+              !isLoggedIn || watchPending
+                ? DISABLED
+                : isWatching
+                ? 'bg-blue-500/20 border-blue-500/60 text-blue-300'
+                : INACTIVE,
+            ].join(' ')}
+          >
+            <Eye size={14} />
+            <span>Watching</span>
+            <span className="tabular-nums opacity-80">
+              {stats.watching_count.toLocaleString()}
+            </span>
+          </button>
+
           {!isLoggedIn && (
             <span className="ml-1 text-xs text-slate-600">Sign in to engage</span>
           )}
@@ -163,7 +206,7 @@ export default function EngagementSection({
 
       {/* ── Tally cards ──────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {STANCES.map((s) => (
+        {OPINION_STANCES.map((s) => (
           <div
             key={s.value}
             className={`rounded-lg border p-3 ${s.tallyBg} ${s.tallyBorder}`}
@@ -175,6 +218,14 @@ export default function EngagementSection({
             <p className="text-xs text-slate-500">{s.label}</p>
           </div>
         ))}
+        {/* Watching tally */}
+        <div className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-3">
+          <div className="mb-1 text-blue-400"><Eye size={18} /></div>
+          <p className="text-xl font-bold tabular-nums text-blue-400">
+            {stats.watching_count.toLocaleString()}
+          </p>
+          <p className="text-xs text-slate-500">Watching</p>
+        </div>
       </div>
 
       {/* ── Progress bar ─────────────────────────── */}

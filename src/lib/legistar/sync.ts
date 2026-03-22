@@ -87,6 +87,50 @@ export async function syncCouncilMembers(): Promise<number> {
   return rows.length
 }
 
+// Notify followers of legislation that changed status during sync
+async function notifyStatusChanges(
+  supabase: ReturnType<typeof createServiceClient>,
+  batch: { slug: string; status: string; title: string; file_number: string }[],
+  prevBySlug: Map<string, { id: string; slug: string; status: string }>
+): Promise<void> {
+  // Find slugs where status changed (skip newly inserted rows with no prev entry)
+  const changedSlugs = batch
+    .filter((r) => {
+      const prev = prevBySlug.get(r.slug)
+      return prev && prev.status !== r.status
+    })
+    .map((r) => r.slug)
+
+  if (!changedSlugs.length) return
+
+  // Get IDs for changed legislation (needed to look up followers)
+  const { data: current } = await supabase
+    .from('legislation')
+    .select('id, slug, status, title, file_number')
+    .in('slug', changedSlugs)
+
+  for (const leg of current ?? []) {
+    const { data: followers } = await supabase
+      .from('legislation_follows')
+      .select('user_id')
+      .eq('legislation_id', leg.id)
+      .eq('notify_updates', true)
+
+    if (!followers?.length) continue
+
+    await supabase.from('notifications').insert(
+      followers.map((f) => ({
+        user_id: f.user_id,
+        type: 'legislation_update',
+        title: `${leg.file_number} status updated`,
+        body: leg.status,
+        url: `/legislation/${leg.slug}`,
+        legislation_id: leg.id,
+      }))
+    )
+  }
+}
+
 // Step 2: Sync legislation from Legistar into the legislation table
 export async function syncLegislation(since = '2022-01-01'): Promise<number> {
   const supabase = createServiceClient()
@@ -117,15 +161,31 @@ export async function syncLegislation(since = '2022-01-01'): Promise<number> {
     legistar_url: `https://legistar.council.nyc.gov/LegislationDetail.aspx?ID=${matter.MatterId}`,
   }))
 
-  // Upsert in batches of 200
+  // Upsert in batches of 200, detecting status changes for notifications
   const batchSize = 200
   let synced = 0
   for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize)
+    const batchSlugs = batch.map((r) => r.slug)
+
+    // Snapshot current status for this batch before overwriting
+    const { data: existing } = await supabase
+      .from('legislation')
+      .select('id, slug, status')
+      .in('slug', batchSlugs)
+
+    const prevBySlug = new Map((existing ?? []).map((e) => [e.slug, e]))
+
     const { error } = await supabase
       .from('legislation')
-      .upsert(rows.slice(i, i + batchSize), { onConflict: 'slug' })
+      .upsert(batch, { onConflict: 'slug' })
     if (error) throw new Error(`Legislation sync failed at batch ${i}: ${error.message}`)
     synced += Math.min(batchSize, rows.length - i)
+
+    // Fire notifications for status changes — best-effort, don't block sync
+    notifyStatusChanges(supabase, batch, prevBySlug).catch((err) =>
+      console.error('Notification dispatch failed:', err)
+    )
   }
 
   return synced
@@ -136,7 +196,7 @@ export async function syncLegislation(since = '2022-01-01'): Promise<number> {
 export async function syncSponsorships(
   offset = 0,
   concurrency = 30
-): Promise<{ synced: number; offset: number; total: number; done: boolean; apiFailed: number; unmatched: number }> {
+): Promise<{ synced: number; offset: number; total: number; done: boolean; apiFailed: number; unmatched: number; sponsorsFound: number }> {
   const supabase = createServiceClient()
 
   // Build legislator lookups: slug → id AND normalized name → id
@@ -261,7 +321,7 @@ export async function fullSync(since = '2022-01-01') {
   const legislation = await syncLegislation(since)
   console.log(`✅ Synced ${legislation} pieces of legislation`)
 
-  const sponsorships = await syncSponsorships(since)
+  const { synced: sponsorships } = await syncSponsorships()
   console.log(`✅ Synced ${sponsorships} sponsorships`)
 
   const stats = await initializeMissingStats()
