@@ -152,13 +152,13 @@ export async function syncLegislation(since = '2022-01-01'): Promise<number> {
     legislature_id: legislature.id,
     file_number: matter.MatterFile,
     slug: toSlug(matter.MatterFile),
-    title: matter.MatterTitle || matter.MatterName,
+    title: matter.MatterTitle || matter.MatterName || matter.MatterFile,
     status: matter.MatterStatusName || 'Unknown',
     type: mapType(matter.MatterTypeName),
     intro_date: parseLegistarDate(matter.MatterIntroDate),
     last_action_date: parseLegistarDate(matter.MatterAgendaDate),
     official_summary: matter.MatterText1 || null,
-    legistar_url: `https://legistar.council.nyc.gov/LegislationDetail.aspx?ID=${matter.MatterId}`,
+    legistar_url: `https://legistar.council.nyc.gov/gateway.aspx?m=l&id=${matter.MatterId}`,
   }))
 
   // Upsert in batches of 200, detecting status changes for notifications

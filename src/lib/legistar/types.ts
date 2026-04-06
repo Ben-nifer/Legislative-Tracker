@@ -10,6 +10,7 @@ export interface LegistarMatterSponsor {
 
 export interface LegistarMatter {
   MatterId: number
+  MatterGuid?: string        // GUID used in Legistar detail page URLs (absent for some matter types)
   MatterFile: string         // e.g. "Int 0001-2024"
   MatterName: string
   MatterTitle: string
