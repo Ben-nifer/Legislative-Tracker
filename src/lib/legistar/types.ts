@@ -16,6 +16,7 @@ export interface LegistarMatter {
   MatterTitle: string
   MatterTypeName: string     // "Introduction", "Resolution", etc.
   MatterStatusName: string   // "Committee", "Enacted", "Filed", etc.
+  MatterBodyId: number       // Committee Legistar body ID
   MatterBodyName: string     // Committee name
   MatterIntroDate: string    // ISO date string (may be "0001-01-01..." for null)
   MatterAgendaDate: string   // Last agenda/action date

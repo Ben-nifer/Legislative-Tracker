@@ -148,6 +148,38 @@ export async function syncLegislation(since = '2022-01-01'): Promise<number> {
     '$orderby': 'MatterIntroDate desc',
   })
 
+  // Build committee map: legistar_body_id → UUID
+  // Upsert all unique committees from this batch first
+  const uniqueCommittees = new Map<number, string>() // bodyId → name
+  for (const matter of matters) {
+    if (matter.MatterBodyId && matter.MatterBodyName && !uniqueCommittees.has(matter.MatterBodyId)) {
+      uniqueCommittees.set(matter.MatterBodyId, matter.MatterBodyName)
+    }
+  }
+
+  const committeeRows = [...uniqueCommittees.entries()].map(([bodyId, name]) => ({
+    name,
+    slug: toSlug(name),
+    legistar_body_id: bodyId,
+    legislature_id: legislature.id,
+  }))
+
+  if (committeeRows.length > 0) {
+    await supabase
+      .from('committees')
+      .upsert(committeeRows, { onConflict: 'legistar_body_id' })
+  }
+
+  // Fetch committee UUIDs after upsert
+  const { data: committeeData } = await supabase
+    .from('committees')
+    .select('id, legistar_body_id')
+    .not('legistar_body_id', 'is', null)
+
+  const committeeIdMap = new Map<number, string>(
+    (committeeData ?? []).map((c) => [c.legistar_body_id, c.id])
+  )
+
   const rows = matters.map(matter => ({
     legislature_id: legislature.id,
     file_number: matter.MatterFile,
@@ -159,6 +191,7 @@ export async function syncLegislation(since = '2022-01-01'): Promise<number> {
     last_action_date: parseLegistarDate(matter.MatterAgendaDate),
     official_summary: matter.MatterText1 || null,
     legistar_url: `https://legistar.council.nyc.gov/gateway.aspx?m=l&id=${matter.MatterId}`,
+    committee_id: matter.MatterBodyId ? (committeeIdMap.get(matter.MatterBodyId) ?? null) : null,
   }))
 
   // Upsert in batches of 200, detecting status changes for notifications

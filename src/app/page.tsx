@@ -22,6 +22,7 @@ type FeedItem = {
   file_number: string
   title: string
   status: string
+  type: string | null
   intro_date: string | null
 }
 
@@ -40,7 +41,7 @@ export default async function HomePage() {
     supabase
       .from('legislation')
       .select('id, slug, file_number, title, status, type, intro_date, ai_summary')
-      .not('type', 'is', null)
+      .eq('type', 'introduction')
       .order('intro_date', { ascending: false })
       .limit(5),
     supabase
@@ -51,7 +52,7 @@ export default async function HomePage() {
       `)
       .not('trending_score', 'is', null)
       .order('trending_score', { ascending: false })
-      .limit(5),
+      .limit(10),
     user
       ? supabase.from('legislator_follows').select('legislator_id').eq('user_id', user.id)
       : Promise.resolve({ data: [] as { legislator_id: string }[], error: null }),
@@ -69,38 +70,44 @@ export default async function HomePage() {
     followedLegislatorIds.length > 0
       ? supabase
           .from('sponsorships')
-          .select('legislator_id, legislation:legislation(id, slug, file_number, title, status, intro_date)')
+          .select('legislator_id, legislation:legislation(id, slug, file_number, title, status, type, intro_date)')
           .in('legislator_id', followedLegislatorIds)
           .order('legislation(intro_date)', { ascending: false })
-          .limit(20)
+          .limit(30)
       : Promise.resolve({ data: [] as { legislator_id: string; legislation: FeedItem | FeedItem[] | null }[], error: null }),
     followedUserIds.length > 0
       ? supabase
           .from('user_stances')
-          .select('legislation:legislation(id, slug, file_number, title, status, intro_date)')
+          .select('legislation:legislation(id, slug, file_number, title, status, type, intro_date)')
           .in('user_id', followedUserIds)
           .order('updated_at', { ascending: false })
-          .limit(20)
+          .limit(30)
       : Promise.resolve({ data: [] as { legislation: FeedItem | FeedItem[] | null }[], error: null }),
   ])
 
-  // Deduplicate and merge both feeds
+  // Deduplicate and merge both feeds (introductions only)
   const seen = new Set<string>()
   const legislatorItems: FeedItem[] = (sponsorshipsResult.data ?? []).flatMap((s) => {
     const leg = Array.isArray(s.legislation) ? s.legislation[0] : s.legislation
-    if (!leg || seen.has(leg.id)) return []
+    if (!leg || seen.has(leg.id) || leg.type !== 'introduction') return []
     seen.add(leg.id)
     return [leg]
   })
 
   const stanceItems: FeedItem[] = (stancesResult.data ?? []).flatMap((s) => {
     const leg = Array.isArray(s.legislation) ? s.legislation[0] : s.legislation
-    if (!leg || seen.has(leg.id)) return []
+    if (!leg || seen.has(leg.id) || leg.type !== 'introduction') return []
     seen.add(leg.id)
     return [leg]
   })
 
   const feedItems = [...legislatorItems, ...stanceItems].slice(0, 6)
+
+  // Filter trending to introductions only
+  const trendingIntroductions = (trending ?? []).filter((row) => {
+    const leg = Array.isArray(row.legislation) ? row.legislation[0] : row.legislation
+    return leg?.type === 'introduction'
+  }).slice(0, 5)
 
   return (
     <main className="min-h-screen bg-slate-950">
@@ -148,7 +155,7 @@ export default async function HomePage() {
           </Link>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {(trending ?? []).map((row) => {
+          {trendingIntroductions.map((row) => {
             const leg = Array.isArray(row.legislation) ? row.legislation[0] : row.legislation
             if (!leg) return null
             const total = (row.support_count ?? 0) + (row.oppose_count ?? 0) + (row.neutral_count ?? 0)

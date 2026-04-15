@@ -52,7 +52,7 @@ async function getTrending(period: Period): Promise<LegislationCardData[]> {
     )
     .gt(orderCol, 0)
     .order(orderCol, { ascending: false })
-    .limit(20)
+    .limit(40)
 
   if (error) {
     console.error('Error fetching trending:', error.message)
@@ -63,7 +63,7 @@ async function getTrending(period: Period): Promise<LegislationCardData[]> {
 
   for (const row of data ?? []) {
     const leg = Array.isArray(row.legislation) ? row.legislation[0] : row.legislation
-    if (!leg) continue
+    if (!leg || leg.type !== 'introduction') continue
 
     const primarySponsorship = (leg.sponsorships ?? []).find((s) => s.is_primary)
     const primaryLegislator = primarySponsorship

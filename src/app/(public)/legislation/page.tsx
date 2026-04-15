@@ -17,38 +17,37 @@ export const revalidate = 0
 type Filters = {
   q?: string
   status?: string
-  type?: string
-  topic_id?: string
+  committee_id?: string
   sort?: string
 }
 
 async function getFilterOptions() {
   const supabase = await createServerSupabaseClient()
 
-  const [{ data: statusRows }, { data: topics }] = await Promise.all([
+  const [{ data: statusRows }, { data: legRows }] = await Promise.all([
     supabase
       .from('legislation')
       .select('status')
+      .eq('type', 'introduction')
       .not('status', 'is', null)
       .order('status'),
     supabase
-      .from('legislation_topics')
-      .select('topic:topics(id, name)')
-      .limit(1000),
+      .from('legislation')
+      .select('committee_id')
+      .eq('type', 'introduction')
+      .not('committee_id', 'is', null),
   ])
 
   // Deduplicate statuses
   const statuses = [...new Set((statusRows ?? []).map((r) => r.status as string))].sort()
 
-  // Deduplicate topics that are actually linked to legislation
-  const topicMap = new Map<string, { id: string; name: string }>()
-  for (const row of topics ?? []) {
-    const t = Array.isArray(row.topic) ? row.topic[0] : row.topic
-    if (t && !topicMap.has(t.id)) topicMap.set(t.id, t)
-  }
-  const linkedTopics = [...topicMap.values()].sort((a, b) => a.name.localeCompare(b.name))
+  // Fetch committees that have at least one introduction
+  const committeeIds = [...new Set((legRows ?? []).map((r) => r.committee_id as string))]
+  const { data: committeeRows } = committeeIds.length > 0
+    ? await supabase.from('committees').select('id, name').in('id', committeeIds).order('name')
+    : { data: [] as { id: string; name: string }[] }
 
-  return { statuses, topics: linkedTopics }
+  return { statuses, committees: committeeRows ?? [] }
 }
 
 async function getLegislation(filters: Filters): Promise<LegislationCardData[]> {
@@ -85,6 +84,7 @@ async function getLegislation(filters: Filters): Promise<LegislationCardData[]> 
       )
     `
     )
+    .eq('type', 'introduction')
     .limit(60)
 
   if (sortByEngagement) {
@@ -103,20 +103,8 @@ async function getLegislation(filters: Filters): Promise<LegislationCardData[]> 
     query = query.eq('status', filters.status)
   }
 
-  if (filters.type) {
-    query = query.ilike('type', `%${filters.type}%`)
-  }
-
-  // Topic filter: get matching legislation IDs first, then filter
-  if (filters.topic_id) {
-    const { data: topicLinks } = await supabase
-      .from('legislation_topics')
-      .select('legislation_id')
-      .eq('topic_id', filters.topic_id)
-
-    const ids = (topicLinks ?? []).map((r) => r.legislation_id)
-    if (ids.length === 0) return []
-    query = query.in('id', ids)
+  if (filters.committee_id) {
+    query = query.eq('committee_id', filters.committee_id)
   }
 
   const { data, error } = await query
@@ -166,18 +154,17 @@ async function getLegislation(filters: Filters): Promise<LegislationCardData[]> 
 export default async function LegislationPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; type?: string; topic_id?: string; sort?: string }>
+  searchParams: Promise<{ q?: string; status?: string; committee_id?: string; sort?: string }>
 }) {
   const params = await searchParams
   const filters: Filters = {
     q: params.q,
     status: params.status,
-    type: params.type,
-    topic_id: params.topic_id,
+    committee_id: params.committee_id,
     sort: params.sort,
   }
 
-  const [legislation, { statuses, topics }] = await Promise.all([
+  const [legislation, { statuses, committees }] = await Promise.all([
     getLegislation(filters),
     getFilterOptions(),
   ])
@@ -196,7 +183,7 @@ export default async function LegislationPage({
                 NYC Council Legislation
               </h1>
               <p className="mt-0.5 text-sm text-slate-400">
-                Browse bills and resolutions introduced in the New York City Council
+                Browse bills introduced in the New York City Council
               </p>
             </div>
           </div>
@@ -204,7 +191,7 @@ export default async function LegislationPage({
           {/* Filters */}
           <div className="mt-6">
             <Suspense>
-              <LegislationFilters statuses={statuses} topics={topics} />
+              <LegislationFilters statuses={statuses} committees={committees} />
             </Suspense>
           </div>
 

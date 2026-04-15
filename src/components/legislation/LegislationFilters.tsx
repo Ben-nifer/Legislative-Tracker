@@ -4,15 +4,15 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { useCallback, useTransition } from 'react'
 import { Search, X } from 'lucide-react'
 
-type Topic = { id: string; name: string }
+type Committee = { id: string; name: string }
 type Status = string
 
 export default function LegislationFilters({
   statuses,
-  topics,
+  committees,
 }: {
   statuses: Status[]
-  topics: Topic[]
+  committees: Committee[]
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -21,8 +21,7 @@ export default function LegislationFilters({
 
   const q = searchParams.get('q') ?? ''
   const status = searchParams.get('status') ?? ''
-  const type = searchParams.get('type') ?? ''
-  const topicId = searchParams.get('topic_id') ?? ''
+  const committeeId = searchParams.get('committee_id') ?? ''
   const sort = searchParams.get('sort') ?? 'most_engaged'
 
   const updateParam = useCallback(
@@ -46,7 +45,7 @@ export default function LegislationFilters({
     })
   }
 
-  const hasFilters = q || status || type || topicId || sort !== 'most_engaged'
+  const hasFilters = q || status || committeeId || sort !== 'most_engaged'
 
   return (
     <div className={`space-y-3 transition-opacity ${isPending ? 'opacity-60' : 'opacity-100'}`}>
@@ -67,17 +66,6 @@ export default function LegislationFilters({
 
       {/* Dropdowns row */}
       <div className="flex flex-wrap gap-2">
-        {/* Type filter */}
-        <select
-          value={type}
-          onChange={(e) => updateParam('type', e.target.value)}
-          className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 outline-none transition-colors focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-        >
-          <option value="">All Types</option>
-          <option value="Introduction">Introduction</option>
-          <option value="Resolution">Resolution</option>
-        </select>
-
         {/* Status filter */}
         <select
           value={status}
@@ -102,17 +90,17 @@ export default function LegislationFilters({
           <option value="most_recent">Most Recent</option>
         </select>
 
-        {/* Topic filter */}
-        {topics.length > 0 && (
+        {/* Committee filter */}
+        {committees.length > 0 && (
           <select
-            value={topicId}
-            onChange={(e) => updateParam('topic_id', e.target.value)}
+            value={committeeId}
+            onChange={(e) => updateParam('committee_id', e.target.value)}
             className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 outline-none transition-colors focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
           >
-            <option value="">All Topics</option>
-            {topics.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
+            <option value="">All Committees</option>
+            {committees.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
               </option>
             ))}
           </select>
