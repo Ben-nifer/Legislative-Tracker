@@ -1,8 +1,103 @@
 'use client'
 
 import { useState } from 'react'
-import { RefreshCw, Sparkles, BarChart2, Tag, Users, FileText } from 'lucide-react'
-import { generateSummariesBatch, generateShortSummaries, seedTopics, runSyncSponsorships } from '@/app/actions/admin'
+import { RefreshCw, Sparkles, BarChart2, Tag, Users, FileText, MapPin } from 'lucide-react'
+import { generateSummariesBatch, generateShortSummaries, seedTopics, runSyncSponsorships, runSyncCouncilMembers, runSyncCommitteeMemberships, runScrapeDistrictData, runSyncCommunityBoards } from '@/app/actions/admin'
+
+function CouncilSyncCard() {
+  const [state, setState] = useState<JobState>('idle')
+  const [log, setLog] = useState<string[]>([])
+  const runningRef = { current: false }
+
+  async function run() {
+    setState('running')
+    setLog([])
+    runningRef.current = true
+
+    try {
+      const membersRes = await runSyncCouncilMembers()
+      if (membersRes.error) {
+        setLog([`✗ Council members: ${membersRes.error}`])
+        setState('error')
+        return
+      }
+      setLog([`✓ Synced ${membersRes.synced} council members`])
+
+      if (!runningRef.current) { setState('done'); return }
+
+      const membershipsRes = await runSyncCommitteeMemberships()
+      if (membershipsRes.error) {
+        setLog(prev => [`✗ Committee memberships: ${membershipsRes.error}`, ...prev])
+        setState('error')
+        return
+      }
+      setLog(prev => [
+        `✓ Committee memberships: ${membershipsRes.processed} legislators, ${membershipsRes.membershipsFound} memberships, ${membershipsRes.committeesCreated} new committees`,
+        ...prev,
+      ])
+      setState('done')
+    } catch (e) {
+      setLog(prev => [`✗ ${String(e)}`, ...prev])
+      setState('error')
+    }
+    runningRef.current = false
+  }
+
+  function stop() {
+    runningRef.current = false
+  }
+
+  return (
+    <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-6 space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-indigo-500/10">
+            <Users className="w-5 h-5 text-indigo-400" />
+          </div>
+          <div>
+            <h2 className="font-semibold text-white">Sync Council Members</h2>
+            <p className="text-sm text-slate-400 mt-0.5">
+              Updates council member records from Legistar, then syncs their committee memberships.
+              Also runs automatically every Monday at 2am.
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          {state === 'running' ? (
+            <button
+              onClick={stop}
+              className="text-sm bg-red-700 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors"
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              onClick={run}
+              className="text-sm bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+            >
+              Run now
+            </button>
+          )}
+        </div>
+      </div>
+
+      {state === 'running' && (
+        <div className="flex items-center gap-2 text-sm text-indigo-300">
+          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+          Running…
+        </div>
+      )}
+
+      {log.length > 0 && (
+        <div className="text-xs rounded-lg p-3 font-mono bg-slate-900/60 text-slate-300 space-y-1 max-h-48 overflow-y-auto">
+          {log.map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function SponsorshipsCard() {
   const [state, setState] = useState<JobState>('idle')
@@ -463,8 +558,47 @@ export default function SyncPage() {
           }}
         />
 
+        {/* Sync council members + committee memberships */}
+        <CouncilSyncCard />
+
         {/* Sync sponsorships */}
         <SponsorshipsCard />
+
+        {/* Sync community boards from NYC Open Data */}
+        <JobCard
+          title="Sync Community Boards"
+          description="Maps community boards to council districts using NYC Open Data GeoJSON. Uses point-in-polygon geometry — no scraping needed."
+          icon={MapPin}
+          color="teal"
+          onRun={async () => {
+            const res = await runSyncCommunityBoards()
+            return res as Record<string, unknown>
+          }}
+        />
+
+        {/* Scrape district data */}
+        <JobCard
+          title="Scrape District Data"
+          description="Pulls neighborhoods and community boards for all 51 districts from council.nyc.gov. Takes ~30s due to rate-limit delays. Any parse failures are logged in the result."
+          icon={Users}
+          color="green"
+          onRun={async () => {
+            const res = await runScrapeDistrictData()
+            return res as Record<string, unknown>
+          }}
+        />
+
+        {/* Sync committee memberships */}
+        <JobCard
+          title="Sync Committee Memberships"
+          description="Fetches each active legislator's committee assignments from Legistar and upserts them into the database."
+          icon={Users}
+          color="teal"
+          onRun={async () => {
+            const res = await runSyncCommitteeMemberships()
+            return res as Record<string, unknown>
+          }}
+        />
 
         {/* Sync legislation from Legistar */}
         <CronJobCard

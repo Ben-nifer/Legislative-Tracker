@@ -3,7 +3,9 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createServerSupabaseClient, createServiceClient } from '@/lib/supabase/server'
 import { summarizeLegislation } from '@/lib/ai/summarize'
-import { syncSponsorships } from '@/lib/legistar/sync'
+import { syncSponsorships, syncCouncilMembers, syncCommitteeMemberships } from '@/lib/legistar/sync'
+import { scrapeAndSyncDistrictData } from '@/lib/council/scrape-districts'
+import { syncCommunityBoardsFromOpenData } from '@/lib/council/sync-community-boards'
 
 // Predefined topics for NYC Council legislation
 const PREDEFINED_TOPICS = [
@@ -198,6 +200,90 @@ export async function generateSummariesBatch(): Promise<{
     .not('type', 'is', null)
 
   return { processed, failed, remaining: remaining ?? 0, ...(firstError ? { error: firstError } : {}) }
+}
+
+/**
+ * Syncs council members from Legistar into the legislators table.
+ */
+export async function runSyncCouncilMembers(): Promise<{
+  synced: number
+  error?: string
+}> {
+  try {
+    await assertAdmin()
+  } catch (e) {
+    return { synced: 0, error: String(e) }
+  }
+  try {
+    const synced = await syncCouncilMembers()
+    return { synced }
+  } catch (e) {
+    return { synced: 0, error: String(e) }
+  }
+}
+
+/**
+ * Syncs committee memberships for all active legislators.
+ */
+export async function runSyncCommitteeMemberships(): Promise<{
+  processed: number
+  membershipsFound: number
+  committeesCreated: number
+  error?: string
+}> {
+  try {
+    await assertAdmin()
+  } catch (e) {
+    return { processed: 0, membershipsFound: 0, committeesCreated: 0, error: String(e) }
+  }
+  try {
+    const result = await syncCommitteeMemberships()
+    return result
+  } catch (e) {
+    return { processed: 0, membershipsFound: 0, committeesCreated: 0, error: String(e) }
+  }
+}
+
+/**
+ * Scrapes neighborhood and community board data from council.nyc.gov for all 51 districts.
+ */
+export async function runScrapeDistrictData(): Promise<{
+  processed: number
+  failed: number
+  errors: string[]
+  error?: string
+}> {
+  try {
+    await assertAdmin()
+  } catch (e) {
+    return { processed: 0, failed: 0, errors: [], error: String(e) }
+  }
+  try {
+    return await scrapeAndSyncDistrictData()
+  } catch (e) {
+    return { processed: 0, failed: 0, errors: [], error: String(e) }
+  }
+}
+
+/**
+ * Syncs community board assignments for all 51 council districts from NYC Open Data GeoJSON.
+ */
+export async function runSyncCommunityBoards(): Promise<{
+  councilDistrictsMapped: number
+  communityBoardsMatched: number
+  errors: string[]
+  error?: string
+}> {
+  try {
+    await assertAdmin()
+  } catch (e) {
+    return { councilDistrictsMapped: 0, communityBoardsMatched: 0, errors: [], error: String(e) }
+  }
+  try {
+    return await syncCommunityBoardsFromOpenData()
+  } catch (e) {
+    return { councilDistrictsMapped: 0, communityBoardsMatched: 0, errors: [], error: String(e) }
+  }
 }
 
 /**

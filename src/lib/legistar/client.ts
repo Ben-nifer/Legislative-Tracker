@@ -63,4 +63,7 @@ export const legistar = {
 
   getOfficeRecords: (params?: Record<string, string>) =>
     legistarFetchAll<LegistarOfficeRecord>('/officerecords', params),
+
+  getPersonOfficeRecords: (personId: number) =>
+    legistarFetchAll<LegistarOfficeRecord>(`/persons/${personId}/officerecords`),
 }

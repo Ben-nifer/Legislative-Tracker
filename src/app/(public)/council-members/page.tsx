@@ -59,8 +59,7 @@ function MemberCard({
       <div className="min-w-0 flex-1">
         <p className="font-medium text-slate-100 truncate">{m.full_name}</p>
         <p className="text-xs text-slate-500 mt-0.5">
-          {m.title ?? 'Council Member'}
-          {m.district ? ` · District ${m.district}` : ''}
+          {m.district ? `District ${m.district}` : (m.title ?? 'Council Member')}
           {sort && m.borough ? ` · ${m.borough}` : ''}
         </p>
         {m.party && <p className="text-xs text-slate-600 mt-0.5">{m.party}</p>}

@@ -87,7 +87,11 @@ export default async function CouncilMemberPage({
 
   const { data: member } = await supabase
     .from('legislators')
-    .select('id, full_name, slug, district, borough, party, email, title, is_active, photo_url')
+    .select(`
+      id, full_name, slug, district, borough, party, email, title, is_active, photo_url,
+      website_url, neighborhoods, community_boards, caucuses,
+      legislator_committee_memberships(is_chair, committee:committees(name, slug))
+    `)
     .eq('slug', slug)
     .maybeSingle()
 
@@ -186,6 +190,96 @@ export default async function CouncilMemberPage({
             </div>
           </div>
         </section>
+
+        {/* District & member info */}
+        {(() => {
+          const memberships = (member.legislator_committee_memberships ?? []) as unknown as {
+            is_chair: boolean
+            committee: { name: string; slug: string } | null
+          }[]
+          const committees = memberships
+            .filter((m) => m.committee)
+            .sort((a, b) => Number(b.is_chair) - Number(a.is_chair))
+
+          const hasAny =
+            member.borough || member.party || member.neighborhoods?.length ||
+            member.community_boards?.length || member.website_url ||
+            committees.length > 0 || member.caucuses?.length
+
+          if (!hasAny) return null
+
+          return (
+            <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 space-y-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+                District Info
+              </h2>
+              <dl className="space-y-2.5 text-sm">
+                {member.borough && (
+                  <div className="flex gap-2">
+                    <dt className="w-36 shrink-0 text-slate-500">Borough</dt>
+                    <dd className="text-slate-200">{member.borough}</dd>
+                  </div>
+                )}
+                {member.party && (
+                  <div className="flex gap-2">
+                    <dt className="w-36 shrink-0 text-slate-500">Party</dt>
+                    <dd className="text-slate-200">{member.party}</dd>
+                  </div>
+                )}
+                {member.neighborhoods?.length > 0 && (
+                  <div className="flex gap-2">
+                    <dt className="w-36 shrink-0 text-slate-500">Neighborhoods</dt>
+                    <dd className="text-slate-200">{member.neighborhoods.join(', ')}</dd>
+                  </div>
+                )}
+                {member.community_boards?.length > 0 && (
+                  <div className="flex gap-2">
+                    <dt className="w-36 shrink-0 text-slate-500">Community Boards</dt>
+                    <dd className="text-slate-200">{member.community_boards.join(', ')}</dd>
+                  </div>
+                )}
+                {member.website_url && (
+                  <div className="flex gap-2">
+                    <dt className="w-36 shrink-0 text-slate-500">Website</dt>
+                    <dd>
+                      <a
+                        href={member.website_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-indigo-400 hover:underline"
+                      >
+                        Official Website →
+                      </a>
+                    </dd>
+                  </div>
+                )}
+                {committees.length > 0 && (
+                  <div className="flex gap-2">
+                    <dt className="w-36 shrink-0 text-slate-500">Committees</dt>
+                    <dd className="space-y-1">
+                      {committees.map((m) => (
+                        <div key={m.committee!.slug} className="flex items-center gap-2">
+                          <span className="text-slate-200">{m.committee!.name}</span>
+                          {m.is_chair && (
+                            <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-400">
+                              Chair
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </dd>
+                  </div>
+                )}
+                {member.caucuses?.length > 0 && (
+                  <div className="flex gap-2">
+                    <dt className="w-36 shrink-0 text-slate-500">Caucuses</dt>
+                    <dd className="text-slate-200">{member.caucuses.join(', ')}</dd>
+                  </div>
+                )}
+              </dl>
+            </section>
+          )
+        })()}
 
         {/* Primary sponsored legislation */}
         <BillSection title="Primary Sponsor" bills={primaryBills} />

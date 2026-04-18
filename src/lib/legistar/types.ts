@@ -39,6 +39,7 @@ export interface LegistarPerson {
 export interface LegistarOfficeRecord {
   OfficeRecordId: number
   OfficeRecordPersonId: number
+  OfficeRecordBodyId: number
   OfficeRecordBodyName: string  // "City Council"
   OfficeRecordTitle: string     // "Council Member", "Speaker", etc.
   OfficeRecordStartDate: string

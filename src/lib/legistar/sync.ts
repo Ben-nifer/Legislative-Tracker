@@ -67,17 +67,36 @@ export async function syncCouncilMembers(): Promise<number> {
   const relevantPersonIds = new Set(personTitles.keys())
   const relevantPersons = persons.filter(p => relevantPersonIds.has(p.PersonId))
 
-  const rows = relevantPersons.map(person => ({
-    legislature_id: legislature.id,
-    full_name: person.PersonFullName,
-    slug: toSlug(person.PersonFullName),
-    email: person.PersonEmail || null,
-    is_active: person.PersonActiveFlag === 1,
-    title: bestTitle(personTitles.get(person.PersonId) ?? ['Council Member']),
-    photo_url: person.PersonPhotoFileName
-      ? `https://legistar.council.nyc.gov/Photos/${person.PersonPhotoFileName}`
-      : null,
-  }))
+  // Pre-fetch existing districts so we can use the district thumbnail if available
+  const { data: existingLegislators } = await supabase
+    .from('legislators')
+    .select('slug, district')
+
+  const districtBySlug = new Map(
+    (existingLegislators ?? [])
+      .filter(l => l.district != null)
+      .map(l => [l.slug, l.district as number])
+  )
+
+  const rows = relevantPersons.map(person => {
+    const slug = toSlug(person.PersonFullName)
+    const district = districtBySlug.get(slug)
+    const photo_url = district != null
+      ? `https://raw.githubusercontent.com/NewYorkCityCouncil/districts/master/thumbnails/district-${String(district).padStart(2, '0')}.jpg`
+      : (person.PersonPhotoFileName
+          ? `https://legistar.council.nyc.gov/Photos/${person.PersonPhotoFileName}`
+          : null)
+    return {
+      legislature_id: legislature.id,
+      legistar_id: person.PersonId,
+      full_name: person.PersonFullName,
+      slug,
+      email: person.PersonEmail || null,
+      is_active: person.PersonActiveFlag === 1,
+      title: bestTitle(personTitles.get(person.PersonId) ?? ['Council Member']),
+      photo_url,
+    }
+  })
 
   const { error } = await supabase
     .from('legislators')
@@ -342,6 +361,101 @@ export async function initializeMissingStats(): Promise<number> {
   }
 
   return missing.length
+}
+
+// Sync committee memberships for all active legislators
+export async function syncCommitteeMemberships(): Promise<{
+  processed: number
+  membershipsFound: number
+  committeesCreated: number
+}> {
+  const supabase = createServiceClient()
+
+  const { data: legislators } = await supabase
+    .from('legislators')
+    .select('id, legistar_id, slug')
+    .eq('is_active', true)
+    .not('legistar_id', 'is', null)
+
+  if (!legislators?.length) return { processed: 0, membershipsFound: 0, committeesCreated: 0 }
+
+  // Pre-fetch existing committees keyed by legistar_body_id
+  const { data: existingCommittees } = await supabase
+    .from('committees')
+    .select('id, legistar_body_id')
+    .not('legistar_body_id', 'is', null)
+
+  const committeeIdMap = new Map<number, string>(
+    (existingCommittees ?? []).map(c => [c.legistar_body_id, c.id])
+  )
+
+  // Bodies that are NOT committees — exclude these
+  const NON_COMMITTEE_BODIES = new Set(['City Council', 'Public Advocate'])
+
+  let processed = 0
+  let membershipsFound = 0
+  let committeesCreated = 0
+
+  // Process in batches of 10 to avoid overwhelming the API
+  const batchSize = 10
+  for (let i = 0; i < legislators.length; i += batchSize) {
+    const batch = legislators.slice(i, i + batchSize)
+
+    const results = await Promise.allSettled(
+      batch.map(leg => legistar.getPersonOfficeRecords(leg.legistar_id!))
+    )
+
+    for (let j = 0; j < batch.length; j++) {
+      const result = results[j]
+      const leg = batch[j]
+      if (result.status !== 'fulfilled') continue
+
+      processed++
+
+      const committeeRecords = result.value.filter(
+        r => !NON_COMMITTEE_BODIES.has(r.OfficeRecordBodyName)
+      )
+
+      for (const record of committeeRecords) {
+        membershipsFound++
+        const { OfficeRecordBodyId, OfficeRecordBodyName, OfficeRecordTitle, OfficeRecordStartDate, OfficeRecordEndDate } = record
+
+        // Look up or create the committee
+        let committeeId = committeeIdMap.get(OfficeRecordBodyId)
+        if (!committeeId) {
+          const { data: newCommittee } = await supabase
+            .from('committees')
+            .upsert(
+              { name: OfficeRecordBodyName, slug: toSlug(OfficeRecordBodyName), legistar_body_id: OfficeRecordBodyId },
+              { onConflict: 'legistar_body_id' }
+            )
+            .select('id')
+            .single()
+
+          if (newCommittee?.id) {
+            committeeId = newCommittee.id
+            committeeIdMap.set(OfficeRecordBodyId, newCommittee.id)
+            committeesCreated++
+          }
+        }
+
+        if (!committeeId) continue
+
+        await supabase.from('legislator_committee_memberships').upsert(
+          {
+            legislator_id: leg.id,
+            committee_id: committeeId,
+            is_chair: OfficeRecordTitle.toLowerCase().includes('chair'),
+            start_date: parseLegistarDate(OfficeRecordStartDate),
+            end_date: parseLegistarDate(OfficeRecordEndDate),
+          },
+          { onConflict: 'legislator_id,committee_id' }
+        )
+      }
+    }
+  }
+
+  return { processed, membershipsFound, committeesCreated }
 }
 
 // Run the full initial sync in sequence
