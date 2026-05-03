@@ -2,9 +2,12 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { format } from 'date-fns'
-import { ArrowLeft, MessageSquare, Bookmark, Tag } from 'lucide-react'
+import { ArrowLeft, MessageSquare, Bookmark, Link as LinkIcon } from 'lucide-react'
 import FollowUserButton from '@/components/profile/FollowUserButton'
 import Avatar from '@/components/profile/Avatar'
+import OwnProfileEditor, { PLATFORMS } from './OwnProfileEditor'
+import AboutEditor from './AboutEditor'
+import CouncilMemberFinder from '@/app/(auth)/profile/CouncilMemberFinder'
 
 export const revalidate = 60
 
@@ -31,7 +34,6 @@ function getStatusStyle(status: string) {
   return 'bg-amber-500/20 text-amber-300'
 }
 
-
 export default async function UserProfilePage({
   params,
 }: {
@@ -43,7 +45,7 @@ export default async function UserProfilePage({
 
   const { data: profile } = await supabase
     .from('user_profiles')
-    .select('id, username, display_name, bio, avatar_url, id')
+    .select('id, username, display_name, bio, avatar_url, links')
     .eq('username', username)
     .maybeSingle()
 
@@ -51,18 +53,8 @@ export default async function UserProfilePage({
 
   const isOwnProfile = user?.id === profile.id
 
-  const [
-    isFollowingResult,
-    { count: userFollowingCount },
-    { count: legislatorFollowingCount },
-    { count: followersCount },
-    { count: supportCount },
-    { count: opposeCount },
-    { count: neutralCount },
-    { data: bookmarksData },
-    { data: commentsData },
-    { data: interestTagsData },
-  ] = await Promise.all([
+  // Base queries for all profiles
+  const baseQueries = [
     user && !isOwnProfile
       ? supabase
           .from('user_follows')
@@ -70,33 +62,12 @@ export default async function UserProfilePage({
           .match({ follower_id: user.id, following_id: profile.id })
           .maybeSingle()
       : Promise.resolve({ data: null }),
-    supabase
-      .from('user_follows')
-      .select('*', { count: 'exact', head: true })
-      .eq('follower_id', profile.id),
-    supabase
-      .from('legislator_follows')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', profile.id),
-    supabase
-      .from('user_follows')
-      .select('*', { count: 'exact', head: true })
-      .eq('following_id', profile.id),
-    supabase
-      .from('user_stances')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', profile.id)
-      .eq('stance', 'support'),
-    supabase
-      .from('user_stances')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', profile.id)
-      .eq('stance', 'oppose'),
-    supabase
-      .from('user_stances')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', profile.id)
-      .eq('stance', 'neutral'),
+    supabase.from('user_follows').select('*', { count: 'exact', head: true }).eq('follower_id', profile.id),
+    supabase.from('legislator_follows').select('*', { count: 'exact', head: true }).eq('user_id', profile.id),
+    supabase.from('user_follows').select('*', { count: 'exact', head: true }).eq('following_id', profile.id),
+    supabase.from('user_stances').select('*', { count: 'exact', head: true }).eq('user_id', profile.id).eq('stance', 'support'),
+    supabase.from('user_stances').select('*', { count: 'exact', head: true }).eq('user_id', profile.id).eq('stance', 'oppose'),
+    supabase.from('user_stances').select('*', { count: 'exact', head: true }).eq('user_id', profile.id).eq('stance', 'neutral'),
     supabase
       .from('legislation_follows')
       .select('legislation(id, slug, file_number, title, status)')
@@ -110,11 +81,35 @@ export default async function UserProfilePage({
       .eq('is_hidden', false)
       .order('created_at', { ascending: false })
       .limit(5),
-    supabase
-      .from('user_interest_tags')
-      .select('tag:interest_tags(id, name, slug, is_predefined)')
-      .eq('user_id', profile.id),
-  ])
+    supabase.from('user_interest_tags').select('tag:interest_tags(id, name, slug, is_predefined)').eq('user_id', profile.id),
+  ] as const
+
+  // Extra queries for own profile edit mode
+  const ownerQueries = isOwnProfile
+    ? [
+        supabase
+          .from('user_profiles')
+          .select('notification_preferences, council_member_id, community_board, council_member:legislators(id, full_name, slug, district, borough, photo_url)')
+          .eq('id', profile.id)
+          .maybeSingle(),
+        supabase.from('interest_tags').select('id, name, slug, is_predefined').eq('is_predefined', true).order('name'),
+        supabase.from('user_interest_tags').select('tag:interest_tags(id, name, slug, is_predefined)').eq('user_id', profile.id),
+      ] as const
+    : null
+
+  const results = await Promise.all(baseQueries)
+  const [
+    isFollowingResult,
+    { count: userFollowingCount },
+    { count: legislatorFollowingCount },
+    { count: followersCount },
+    { count: supportCount },
+    { count: opposeCount },
+    { count: neutralCount },
+    { data: bookmarksData },
+    { data: commentsData },
+    { data: interestTagsData },
+  ] = results
 
   const isFollowing = !!(isFollowingResult as { data: unknown }).data
   const followingCount = (userFollowingCount ?? 0) + (legislatorFollowingCount ?? 0)
@@ -133,6 +128,42 @@ export default async function UserProfilePage({
     const leg = Array.isArray(c.legislation) ? c.legislation[0] : c.legislation
     return { ...c, legislation: leg ?? null }
   })
+
+  const activeLinks = ((profile.links ?? []) as { platform: string; url: string }[]).filter(l => l.url?.trim())
+
+  // Owner-specific data for edit mode
+  let ownerData: {
+    notificationPreferences: Record<string, boolean> | null
+    communityBoard: string | null
+    councilMember: { id: string; full_name: string; slug: string; district: number; borough: string | null; photo_url: string | null } | null
+    predefinedTags: { id: string; name: string; slug: string; is_predefined: boolean }[]
+    selectedIds: string[]
+    customTags: { id: string; name: string; slug: string; is_predefined: boolean }[]
+  } | null = null
+
+  if (isOwnProfile && ownerQueries) {
+    const [ownerProfileResult, predefinedTagsResult, userTagsResult] = await Promise.all(ownerQueries)
+    const ownerProfile = ownerProfileResult.data
+    const councilMemberRaw = ownerProfile?.council_member
+    const councilMember = councilMemberRaw
+      ? (Array.isArray(councilMemberRaw) ? councilMemberRaw[0] : councilMemberRaw) ?? null
+      : null
+
+    const predefinedTags = predefinedTagsResult.data ?? []
+    const userTags = (userTagsResult.data ?? []).flatMap((r) => {
+      const t = Array.isArray(r.tag) ? r.tag[0] : r.tag
+      return t ? [t] : []
+    })
+
+    ownerData = {
+      notificationPreferences: ownerProfile?.notification_preferences ?? null,
+      communityBoard: ownerProfile?.community_board ?? null,
+      councilMember: councilMember as typeof ownerData extends null ? never : NonNullable<typeof ownerData>['councilMember'],
+      predefinedTags,
+      selectedIds: userTags.map(t => t.id),
+      customTags: userTags.filter(t => !t.is_predefined),
+    }
+  }
 
   return (
     <main className="min-h-screen bg-slate-950">
@@ -153,10 +184,57 @@ export default async function UserProfilePage({
         <section className="flex items-start gap-5">
           <Avatar src={profile.avatar_url} name={profile.display_name} size="lg" />
           <div className="flex-1 min-w-0">
-            <h1 className="text-2xl font-bold text-white">{profile.display_name}</h1>
-            <p className="text-slate-500 text-sm mt-0.5">@{profile.username}</p>
-            {profile.bio && (
-              <p className="mt-2 text-sm text-slate-300">{profile.bio}</p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h1 className="text-2xl font-bold text-white">{profile.display_name}</h1>
+                <p className="text-slate-500 text-sm mt-0.5">@{profile.username}</p>
+              </div>
+              {isOwnProfile && ownerData && (
+                <OwnProfileEditor
+                  profile={{
+                    id: profile.id,
+                    username: profile.username,
+                    display_name: profile.display_name,
+                    bio: profile.bio,
+                    avatar_url: profile.avatar_url,
+                    links: profile.links as { platform: string; url: string }[] | null,
+                    notification_preferences: ownerData.notificationPreferences as {
+                      hearing_alerts: boolean
+                      bill_updates: boolean
+                      comment_engagement: boolean
+                      new_followers: boolean
+                    } | null,
+                  }}
+                  predefinedTags={ownerData.predefinedTags}
+                  selectedIds={ownerData.selectedIds}
+                  customTags={ownerData.customTags}
+                />
+              )}
+            </div>
+
+            {/* Social links */}
+            {activeLinks.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {activeLinks.map(({ platform, url }) => {
+                  const p = PLATFORMS.find(pl => pl.key === platform)
+                  const Icon = p?.Icon ?? LinkIcon
+                  const color = p?.color ?? 'text-slate-400'
+                  const href = url.startsWith('http') ? url : `https://${url}`
+                  return (
+                    <a
+                      key={platform}
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={p?.label ?? platform}
+                      className={`flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs ${color} transition-colors hover:border-slate-600`}
+                    >
+                      <Icon size={13} />
+                      {p?.label ?? platform}
+                    </a>
+                  )
+                })}
+              </div>
             )}
 
             {/* Interest tags */}
@@ -188,15 +266,28 @@ export default async function UserProfilePage({
               </span>
             </div>
 
-            <div className="mt-3">
-              <FollowUserButton
-                targetUserId={profile.id}
-                initialIsFollowing={isFollowing}
-                isOwnProfile={isOwnProfile}
-              />
-            </div>
+            {!isOwnProfile && (
+              <div className="mt-3">
+                <FollowUserButton
+                  targetUserId={profile.id}
+                  initialIsFollowing={isFollowing}
+                  isOwnProfile={isOwnProfile}
+                />
+              </div>
+            )}
           </div>
         </section>
+
+        {/* About */}
+        <AboutEditor initialBio={profile.bio} displayName={profile.display_name} isOwnProfile={isOwnProfile} />
+
+        {/* Council Member Finder — own profile only */}
+        {isOwnProfile && ownerData && (
+          <CouncilMemberFinder
+            initialMember={ownerData.councilMember}
+            initialCommunityBoard={ownerData.communityBoard}
+          />
+        )}
 
         {/* Stance summary */}
         <section>

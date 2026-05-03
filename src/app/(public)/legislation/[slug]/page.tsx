@@ -16,7 +16,7 @@ import { formatDistanceToNow, format } from 'date-fns'
 import CommentThread from '@/components/comments/CommentThread'
 import EngagementSection from '@/components/legislation/EngagementSection'
 
-export const revalidate = 300
+export const dynamic = 'force-dynamic'
 
 // ---------------------------------------------------------------------------
 // Types

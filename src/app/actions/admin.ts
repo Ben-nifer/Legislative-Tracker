@@ -305,11 +305,8 @@ export async function generateShortSummaries(): Promise<{
 
   const { data: batch, error } = await supabase
     .from('legislation')
-    .select('id, ai_summary')
+    .select('id, title, ai_summary')
     .is('short_summary', null)
-    .not('ai_summary', 'is', null)
-    .neq('ai_summary', '')
-    .eq('type', 'introduction')
     .limit(25)
 
   if (error) return { processed: 0, total: 0, done: true, error: error.message }
@@ -319,9 +316,6 @@ export async function generateShortSummaries(): Promise<{
     .from('legislation')
     .select('*', { count: 'exact', head: true })
     .is('short_summary', null)
-    .not('ai_summary', 'is', null)
-    .neq('ai_summary', '')
-    .eq('type', 'introduction')
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   let processed = 0
@@ -329,13 +323,14 @@ export async function generateShortSummaries(): Promise<{
   await Promise.all(
     batch.map(async (item) => {
       try {
+        const content = item.ai_summary?.trim() || item.title
         const message = await anthropic.messages.create({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 64,
           messages: [
             {
               role: 'user',
-              content: `Summarize this legislation in 5-10 words using plain language. Return only the summary, no punctuation at the end: ${item.ai_summary}`,
+              content: `Summarize this legislation in 5-10 words using plain language. Return only the summary, no punctuation at the end: ${content}`,
             },
           ],
         })

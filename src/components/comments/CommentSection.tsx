@@ -20,6 +20,7 @@ export default function CommentSection({
 }) {
   const router = useRouter()
   const [comments, setComments] = useState<CommentData[]>(initialComments)
+
   const [sort, setSort] = useState<Sort>('latest')
   const [body, setBody] = useState('')
   const [loading, setLoading] = useState(false)

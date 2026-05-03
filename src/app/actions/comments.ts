@@ -45,7 +45,9 @@ export async function addComment(
       .single(),
   ])
 
-  const stanceContext = stanceRow?.stance ?? null
+  const stanceContext = (stanceRow?.stance && stanceRow.stance !== 'watching')
+    ? stanceRow.stance as 'support' | 'oppose' | 'neutral'
+    : null
 
   const { data, error } = await supabase
     .from('comments')
@@ -66,7 +68,7 @@ export async function addComment(
     return { error: error?.message ?? 'Failed to post comment' }
   }
 
-  revalidatePath('/legislation/[slug]', 'page')
+  revalidatePath('/legislation', 'layout')
 
   return {
     comment: {

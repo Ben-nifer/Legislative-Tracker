@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { User, LogOut, ChevronDown, ExternalLink, Users } from 'lucide-react'
+import { LogOut, ChevronDown, ExternalLink, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import Avatar from '@/components/profile/Avatar'
 
@@ -58,13 +58,6 @@ export default function UserMenu({
             className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
           >
             <ExternalLink size={14} /> Profile
-          </Link>
-          <Link
-            href="/profile"
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
-          >
-            <User size={14} /> Edit Profile
           </Link>
           <Link
             href="/following"

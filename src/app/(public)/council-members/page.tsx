@@ -117,50 +117,82 @@ export default async function CouncilMembersPage({
 
   const memberList = members ?? []
 
-  // Fetch sponsorship stats when a sort is active
+  // Fetch sponsorship stats when a sort is active — query user_stances directly for live accuracy
   let statsByMember = new Map<string, MemberStats>()
 
   if (isSorted) {
     const memberIds = memberList.map((m) => m.id)
 
-    const { data: sponsorshipRows } = await supabase
+    // Step 1: get all legislation IDs sponsored by these members
+    const { data: sponsorships } = await supabase
       .from('sponsorships')
-      .select(`
-        legislator_id,
-        legislation:legislation(
-          stats:legislation_stats(support_count, oppose_count, neutral_count, watching_count)
-        )
-      `)
+      .select('legislator_id, legislation_id')
       .in('legislator_id', memberIds)
-      .limit(10000)
 
-    // Aggregate per legislator
-    for (const row of sponsorshipRows ?? []) {
-      const leg = Array.isArray(row.legislation) ? row.legislation[0] : row.legislation
-      const rawStats = leg ? (Array.isArray(leg.stats) ? leg.stats[0] : leg.stats) : null
-      if (!rawStats) continue
+    const legIds = [...new Set((sponsorships ?? []).map((s) => s.legislation_id))]
 
-      const current = statsByMember.get(row.legislator_id) ?? {
-        support: 0, oppose: 0, neutral: 0, watching: 0, total: 0, popularityRatio: 0.5,
-      }
-      const support = current.support + (rawStats.support_count ?? 0)
-      const oppose = current.oppose + (rawStats.oppose_count ?? 0)
-      const neutral = current.neutral + (rawStats.neutral_count ?? 0)
-      const watching = current.watching + (rawStats.watching_count ?? 0)
-      const total = support + oppose + neutral + watching
-      const popularityRatio = (support + oppose) > 0 ? support / (support + oppose) : 0.5
+    // Step 2: fetch stances and comment counts for those legislation items
+    const [{ data: stanceRows }, { data: commentRows }] = await Promise.all([
+      legIds.length > 0
+        ? supabase.from('user_stances').select('legislation_id, stance').in('legislation_id', legIds)
+        : Promise.resolve({ data: [] }),
+      legIds.length > 0
+        ? supabase.from('comments').select('legislation_id').eq('is_hidden', false).in('legislation_id', legIds)
+        : Promise.resolve({ data: [] }),
+    ])
 
-      statsByMember.set(row.legislator_id, { support, oppose, neutral, watching, total, popularityRatio })
+    // Build lookup: legislation_id → { stanceCounts, commentCount }
+    type LegStats = { support: number; oppose: number; neutral: number; watching: number; comments: number }
+    const byLeg = new Map<string, LegStats>()
+    for (const { legislation_id, stance } of stanceRows ?? []) {
+      if (!byLeg.has(legislation_id)) byLeg.set(legislation_id, { support: 0, oppose: 0, neutral: 0, watching: 0, comments: 0 })
+      const s = byLeg.get(legislation_id)!
+      if (stance === 'support') s.support++
+      else if (stance === 'oppose') s.oppose++
+      else if (stance === 'neutral') s.neutral++
+      else if (stance === 'watching') s.watching++
+    }
+    for (const { legislation_id } of commentRows ?? []) {
+      if (!byLeg.has(legislation_id)) byLeg.set(legislation_id, { support: 0, oppose: 0, neutral: 0, watching: 0, comments: 0 })
+      byLeg.get(legislation_id)!.comments++
+    }
+
+    // Step 3: aggregate per legislator
+    for (const { legislator_id, legislation_id } of sponsorships ?? []) {
+      const leg = byLeg.get(legislation_id)
+      if (!leg) continue
+
+      const current = statsByMember.get(legislator_id) ?? { support: 0, oppose: 0, neutral: 0, watching: 0, total: 0, popularityRatio: 0 }
+      const support = current.support + leg.support
+      const oppose = current.oppose + leg.oppose
+      const neutral = current.neutral + leg.neutral
+      const watching = current.watching + leg.watching
+      const total = current.total + leg.support + leg.oppose + leg.neutral + leg.watching + leg.comments
+      const popularityRatio = (support + oppose) > 0 ? support / (support + oppose) : 0
+
+      statsByMember.set(legislator_id, { support, oppose, neutral, watching, total, popularityRatio })
     }
   }
 
   // Sort members
   const sortedMembers = isSorted
     ? [...memberList].sort((a, b) => {
-        const sa = statsByMember.get(a.id) ?? { support: 0, oppose: 0, neutral: 0, watching: 0, total: 0, popularityRatio: 0.5 }
-        const sb = statsByMember.get(b.id) ?? { support: 0, oppose: 0, neutral: 0, watching: 0, total: 0, popularityRatio: 0.5 }
-        if (sort === 'most_popular') return sb.popularityRatio - sa.popularityRatio
-        if (sort === 'least_popular') return sa.popularityRatio - sb.popularityRatio
+        const sa = statsByMember.get(a.id) ?? { support: 0, oppose: 0, neutral: 0, watching: 0, total: 0, popularityRatio: 0 }
+        const sb = statsByMember.get(b.id) ?? { support: 0, oppose: 0, neutral: 0, watching: 0, total: 0, popularityRatio: 0 }
+        if (sort === 'most_popular') {
+          // Primary: popularity ratio descending; tiebreaker: raw support count descending
+          const diff = sb.popularityRatio - sa.popularityRatio
+          return diff !== 0 ? diff : sb.support - sa.support
+        }
+        if (sort === 'least_popular') {
+          // Only rank members who have actual oppose data; rest go to bottom
+          const aHasData = sa.support + sa.oppose > 0
+          const bHasData = sb.support + sb.oppose > 0
+          if (aHasData && !bHasData) return -1
+          if (!aHasData && bHasData) return 1
+          const diff = sa.popularityRatio - sb.popularityRatio
+          return diff !== 0 ? diff : sa.oppose - sb.oppose
+        }
         if (sort === 'most_engaged') return sb.total - sa.total
         return 0
       })
